@@ -1,67 +1,81 @@
 """
-Dependencies - FastAPI dependency injection.
+Dependencies - Updated with proper JWT authentication.
 """
 
-from typing import Optional
+from typing import Optional, List
 from fastapi import Depends, HTTPException, Header, Request, status
+from fastapi.security import OAuth2PasswordBearer
 from loguru import logger
 
 from mlcf.api.exceptions import AuthenticationError, AuthorizationError
+from mlcf.api.auth.jwt import token_manager
+from mlcf.api.auth.user_store import user_store
+from mlcf.api.auth.token_blacklist import token_blacklist
+from mlcf.api.auth.models import UserRole, Permission
 from mlcf.api.main import app_state
-from mlcf.core.orchestrator import ContextOrchestrator
-from mlcf.retrieval.hybrid_retriever import HybridRetriever
-from mlcf.graph.knowledge_graph import KnowledgeGraph
 
 
-# Authentication/Authorization
+# OAuth2 scheme
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/token",
+    auto_error=False
+)
+
 
 async def get_current_user(
-    authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None)
+    token: Optional[str] = Depends(oauth2_scheme),
+    authorization: Optional[str] = Header(None)
 ) -> dict:
     """
     Get current authenticated user.
     
-    This is a placeholder implementation. In production, implement proper
-    JWT/OAuth2 authentication.
+    Supports both Bearer token and API key authentication.
     """
-    # For development, return a mock user
-    # TODO: Implement proper authentication
-    
-    if authorization:
-        # Parse Bearer token
+    # Try Bearer token first
+    if not token and authorization:
         if authorization.startswith("Bearer "):
             token = authorization[7:]
-            # TODO: Validate JWT token
-            return {
-                "id": "user_123",
-                "username": "demo_user",
-                "email": "demo@example.com",
-                "roles": ["user"]
-            }
     
-    if x_api_key:
-        # Validate API key
-        # TODO: Check API key against database
-        if x_api_key == "dev_api_key":  # Development only!
-            return {
-                "id": "api_client_123",
-                "username": "api_client",
-                "email": "api@example.com",
-                "roles": ["user"]
-            }
+    if not token:
+        # For development, allow unauthenticated access
+        # TODO: Remove in production
+        logger.debug("No authentication token provided")
+        return {
+            "id": "anonymous",
+            "username": "anonymous",
+            "email": "anonymous@example.com",
+            "roles": [UserRole.USER.value]
+        }
     
-    # For development, allow unauthenticated access
-    # TODO: Remove this in production
-    return {
-        "id": "anonymous",
-        "username": "anonymous",
-        "email": "anonymous@example.com",
-        "roles": ["user"]
-    }
+    try:
+        # Check if token is blacklisted
+        if token_blacklist.is_token_revoked(token):
+            raise AuthenticationError("Token has been revoked")
+        
+        # Verify token
+        payload = token_manager.verify_token(token, token_type="access")
+        
+        # Get user from store
+        user_id = payload.get("user_id")
+        user = user_store.get_user_by_id(user_id)
+        
+        if not user or user.disabled:
+            raise AuthenticationError("User not found or disabled")
+        
+        # Return user data
+        return {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "roles": [role.value for role in user.roles],
+            "permissions": [p.value for p in user.get_permissions()]
+        }
     
-    # Uncomment for production:
-    # raise AuthenticationError("Authentication required")
+    except AuthenticationError:
+        raise
+    except Exception as e:
+        logger.error(f"Authentication failed: {e}")
+        raise AuthenticationError("Invalid authentication credentials")
 
 
 async def get_admin_user(
@@ -70,23 +84,62 @@ async def get_admin_user(
     """
     Require admin role.
     """
-    if "admin" not in current_user.get("roles", []):
-        # For development, allow all users
-        # TODO: Enforce in production
-        logger.warning(
-            f"Non-admin user {current_user.get('id')} accessing admin endpoint"
-        )
-        # raise AuthorizationError("Admin access required")
+    if UserRole.ADMIN.value not in current_user.get("roles", []):
+        raise AuthorizationError("Admin access required")
     
     return current_user
 
 
-# Component Dependencies
+def require_permission(permission: Permission):
+    """
+    Dependency factory for requiring specific permission.
+    
+    Usage:
+        @app.get("/endpoint", dependencies=[Depends(require_permission(Permission.CONTEXT_WRITE))])
+    """
+    async def permission_checker(
+        current_user: dict = Depends(get_current_user)
+    ):
+        """Check if user has required permission."""
+        user_permissions = current_user.get("permissions", [])
+        
+        if permission.value not in user_permissions:
+            raise AuthorizationError(
+                f"Permission required: {permission.value}"
+            )
+        
+        return current_user
+    
+    return permission_checker
 
-async def get_orchestrator() -> ContextOrchestrator:
+
+def require_role(role: UserRole):
     """
-    Get context orchestrator instance.
+    Dependency factory for requiring specific role.
+    
+    Usage:
+        @app.get("/endpoint", dependencies=[Depends(require_role(UserRole.ADMIN))])
     """
+    async def role_checker(
+        current_user: dict = Depends(get_current_user)
+    ):
+        """Check if user has required role."""
+        user_roles = current_user.get("roles", [])
+        
+        if role.value not in user_roles:
+            raise AuthorizationError(
+                f"Role required: {role.value}"
+            )
+        
+        return current_user
+    
+    return role_checker
+
+
+# Component dependencies (unchanged)
+
+async def get_orchestrator():
+    """Get context orchestrator instance."""
     if not app_state.orchestrator:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -95,10 +148,8 @@ async def get_orchestrator() -> ContextOrchestrator:
     return app_state.orchestrator
 
 
-async def get_retriever() -> HybridRetriever:
-    """
-    Get hybrid retriever instance.
-    """
+async def get_retriever():
+    """Get hybrid retriever instance."""
     if not app_state.vector_store and not app_state.graph_store:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -112,48 +163,13 @@ async def get_retriever() -> HybridRetriever:
     )
 
 
-async def get_knowledge_graph() -> KnowledgeGraph:
-    """
-    Get knowledge graph instance.
-    """
+async def get_knowledge_graph():
+    """Get knowledge graph instance."""
     if not app_state.graph_store:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Knowledge graph not available"
         )
     
+    from mlcf.graph.knowledge_graph import KnowledgeGraph
     return KnowledgeGraph(neo4j_store=app_state.graph_store)
-
-
-# Validation Dependencies
-
-async def validate_request_size(
-    request: Request,
-    max_size: int = 1024 * 1024  # 1MB
-):
-    """
-    Validate request body size.
-    """
-    content_length = request.headers.get("content-length")
-    
-    if content_length:
-        content_length = int(content_length)
-        if content_length > max_size:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Request size {content_length} exceeds maximum {max_size}"
-            )
-
-
-async def validate_query_length(
-    query: str,
-    max_length: int = 1000
-):
-    """
-    Validate query string length.
-    """
-    if len(query) > max_length:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Query length {len(query)} exceeds maximum {max_length}"
-        )
