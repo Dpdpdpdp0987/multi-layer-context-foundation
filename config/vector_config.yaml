@@ -1,0 +1,74 @@
+# Vector Database Configuration
+
+vector_store:
+  # Provider: qdrant, postgres, supabase
+  provider: "qdrant"
+  
+  # Qdrant Configuration
+  qdrant:
+    host: "localhost"
+    port: 6333
+    collection_name: "mlcf_vectors"
+    distance_metric: "Cosine"  # Cosine, Euclidean, Dot
+    grpc_port: 6334  # Optional gRPC port
+  
+  # PostgreSQL with pgvector
+  postgres:
+    connection_string: "postgresql://user:password@localhost:5432/mlcf"
+    table_name: "context_vectors"
+    pool_size: 10
+    max_overflow: 20
+  
+  # Supabase Configuration
+  supabase:
+    url: "https://your-project.supabase.co"
+    key: "your-anon-key"
+    table_name: "context_items"
+
+# Embedding Configuration
+embeddings:
+  model: "sentence-transformers/all-MiniLM-L6-v2"
+  dimension: 384
+  device: "cpu"  # cpu, cuda, mps
+  normalize: true
+  batch_size: 32
+  
+  # Alternative models
+  # model: "sentence-transformers/all-mpnet-base-v2"  # dim=768, better quality
+  # model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # multilingual
+
+# Search Configuration
+search:
+  # Semantic search
+  semantic:
+    score_threshold: 0.5
+    max_results: 10
+    normalize_scores: true
+  
+  # Hybrid search weights
+  hybrid:
+    semantic_weight: 0.6
+    keyword_weight: 0.4
+    graph_weight: 0.0
+  
+  # Reranking
+  reranking:
+    enabled: false
+    model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    top_k: 100
+
+# Chunking Configuration
+chunking:
+  chunk_size: 512
+  min_chunk_size: 100
+  max_chunk_size: 1024
+  base_overlap: 50
+  adaptive_overlap: true
+  preserve_sentences: true
+
+# Performance
+performance:
+  enable_caching: true
+  cache_ttl: 300  # seconds
+  async_indexing: true
+  batch_size: 100

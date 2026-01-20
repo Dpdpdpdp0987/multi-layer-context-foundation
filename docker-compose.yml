@@ -15,6 +15,21 @@ services:
     networks:
       - mlcf-network
 
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: mlcf-postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=mlcf
+      - POSTGRES_PASSWORD=mlcf_password
+      - POSTGRES_DB=mlcf
+    restart: unless-stopped
+    networks:
+      - mlcf-network
+
   neo4j:
     image: neo4j:5.14
     container_name: mlcf-neo4j
@@ -51,6 +66,7 @@ networks:
 
 volumes:
   qdrant_data:
+  postgres_data:
   neo4j_data:
   neo4j_logs:
   redis_data:
