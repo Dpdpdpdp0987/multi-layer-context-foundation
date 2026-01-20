@@ -1,123 +1,161 @@
----
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: mlcf-alerts
-  namespace: mlcf
+  name: context-foundation-alerts
+  namespace: context-foundation
   labels:
     prometheus: kube-prometheus
+    role: alert-rules
 spec:
   groups:
-  - name: mlcf-api
+  - name: context-api.rules
     interval: 30s
     rules:
-    - alert: MLCFAPIHighErrorRate
+    - alert: ContextAPIHighErrorRate
       expr: |
-        sum(rate(http_requests_total{job="mlcf-api",status=~"5.."}[5m]))
-        /
-        sum(rate(http_requests_total{job="mlcf-api"}[5m]))
-        > 0.05
+        (
+          sum(rate(http_requests_total{job="context-api",status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="context-api"}[5m]))
+        ) > 0.05
+      for: 5m
+      labels:
+        severity: warning
+        component: api
+      annotations:
+        summary: "High error rate detected in Context API"
+        description: "Context API error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+    
+    - alert: ContextAPIHighLatency
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(http_request_duration_seconds_bucket{job="context-api"}[5m])) by (le)
+        ) > 2
+      for: 5m
+      labels:
+        severity: warning
+        component: api
+      annotations:
+        summary: "High latency detected in Context API"
+        description: "95th percentile latency is {{ $value }}s (threshold: 2s)"
+    
+    - alert: ContextAPIPodDown
+      expr: |
+        kube_deployment_status_replicas_available{deployment="context-api",namespace="context-foundation"} < 2
       for: 5m
       labels:
         severity: critical
+        component: api
       annotations:
-        summary: "High error rate on MLCF API"
-        description: "Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+        summary: "Context API has insufficient replicas"
+        description: "Only {{ $value }} replica(s) available (minimum: 2)"
     
-    - alert: MLCFAPIHighLatency
+    - alert: ContextAPIMemoryPressure
       expr: |
-        histogram_quantile(0.95, 
-          sum(rate(http_request_duration_seconds_bucket{job="mlcf-api"}[5m])) by (le)
+        (
+          container_memory_working_set_bytes{pod=~"context-api-.*",namespace="context-foundation"}
+          /
+          container_spec_memory_limit_bytes{pod=~"context-api-.*",namespace="context-foundation"}
+        ) > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        component: api
+      annotations:
+        summary: "Context API pod experiencing memory pressure"
+        description: "Memory usage is {{ $value | humanizePercentage }} (threshold: 90%)"
+  
+  - name: qdrant.rules
+    interval: 30s
+    rules:
+    - alert: QdrantPodDown
+      expr: |
+        kube_statefulset_status_replicas_ready{statefulset="qdrant",namespace="context-foundation"} < 2
+      for: 5m
+      labels:
+        severity: critical
+        component: vector-db
+      annotations:
+        summary: "Qdrant has insufficient replicas"
+        description: "Only {{ $value }} replica(s) ready (minimum: 2)"
+    
+    - alert: QdrantHighDiskUsage
+      expr: |
+        (
+          kubelet_volume_stats_used_bytes{namespace="context-foundation",persistentvolumeclaim=~"qdrant-storage-.*"}
+          /
+          kubelet_volume_stats_capacity_bytes{namespace="context-foundation",persistentvolumeclaim=~"qdrant-storage-.*"}
+        ) > 0.85
+      for: 10m
+      labels:
+        severity: warning
+        component: vector-db
+      annotations:
+        summary: "Qdrant storage usage is high"
+        description: "Disk usage is {{ $value | humanizePercentage }} (threshold: 85%)"
+    
+    - alert: QdrantSearchLatencyHigh
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(qdrant_search_duration_seconds_bucket[5m])) by (le)
         ) > 1
       for: 5m
       labels:
         severity: warning
+        component: vector-db
       annotations:
-        summary: "High latency on MLCF API"
-        description: "95th percentile latency is {{ $value }}s"
-    
-    - alert: MLCFAPIPodDown
-      expr: kube_deployment_status_replicas_available{deployment="mlcf-api"} < 2
-      for: 5m
-      labels:
-        severity: critical
-      annotations:
-        summary: "MLCF API has less than 2 replicas available"
-        description: "Only {{ $value }} replicas available"
-    
-    - alert: MLCFAPIHighMemoryUsage
-      expr: |
-        container_memory_usage_bytes{pod=~"mlcf-api.*",container="api"}
-        /
-        container_spec_memory_limit_bytes{pod=~"mlcf-api.*",container="api"}
-        > 0.9
-      for: 5m
-      labels:
-        severity: warning
-      annotations:
-        summary: "MLCF API high memory usage"
-        description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"
-    
-    - alert: MLCFAPIHighCPUUsage
-      expr: |
-        rate(container_cpu_usage_seconds_total{pod=~"mlcf-api.*",container="api"}[5m])
-        /
-        container_spec_cpu_quota{pod=~"mlcf-api.*",container="api"}
-        * 100000
-        > 0.9
-      for: 10m
-      labels:
-        severity: warning
-      annotations:
-        summary: "MLCF API high CPU usage"
-        description: "CPU usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"
+        summary: "Qdrant search latency is high"
+        description: "95th percentile search latency is {{ $value }}s (threshold: 1s)"
   
-  - name: qdrant
+  - name: neo4j.rules
     interval: 30s
     rules:
-    - alert: QdrantNodeDown
-      expr: up{job="qdrant"} == 0
+    - alert: Neo4jPodDown
+      expr: |
+        kube_statefulset_status_replicas_ready{statefulset="neo4j",namespace="context-foundation"} < 2
       for: 5m
       labels:
         severity: critical
+        component: graph-db
       annotations:
-        summary: "Qdrant node is down"
-        description: "Qdrant instance {{ $labels.instance }} is down"
+        summary: "Neo4j has insufficient replicas"
+        description: "Only {{ $value }} replica(s) ready (minimum: 2)"
     
-    - alert: QdrantHighMemoryUsage
+    - alert: Neo4jHighDiskUsage
       expr: |
-        container_memory_usage_bytes{pod=~"qdrant.*"}
-        /
-        container_spec_memory_limit_bytes{pod=~"qdrant.*"}
-        > 0.9
+        (
+          kubelet_volume_stats_used_bytes{namespace="context-foundation",persistentvolumeclaim=~"neo4j-data-.*"}
+          /
+          kubelet_volume_stats_capacity_bytes{namespace="context-foundation",persistentvolumeclaim=~"neo4j-data-.*"}
+        ) > 0.85
       for: 10m
       labels:
         severity: warning
+        component: graph-db
       annotations:
-        summary: "Qdrant high memory usage"
-        description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"
-  
-  - name: neo4j
-    interval: 30s
-    rules:
-    - alert: Neo4jNodeDown
-      expr: up{job="neo4j"} == 0
+        summary: "Neo4j storage usage is high"
+        description: "Disk usage is {{ $value | humanizePercentage }} (threshold: 85%)"
+    
+    - alert: Neo4jClusterNotHealthy
+      expr: |
+        neo4j_cluster_core_is_leader{namespace="context-foundation"} == 0
       for: 5m
       labels:
         severity: critical
+        component: graph-db
       annotations:
-        summary: "Neo4j node is down"
-        description: "Neo4j instance {{ $labels.instance }} is down"
+        summary: "Neo4j cluster has no leader"
+        description: "Neo4j cluster is not healthy - no leader elected"
     
-    - alert: Neo4jHighMemoryUsage
+    - alert: Neo4jHighQueryLatency
       expr: |
-        container_memory_usage_bytes{pod=~"neo4j.*"}
-        /
-        container_spec_memory_limit_bytes{pod=~"neo4j.*"}
-        > 0.9
-      for: 10m
+        histogram_quantile(0.95,
+          sum(rate(neo4j_transaction_last_committed_tx_id_duration_seconds_bucket[5m])) by (le)
+        ) > 5
+      for: 5m
       labels:
         severity: warning
+        component: graph-db
       annotations:
-        summary: "Neo4j high memory usage"
-        description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"
+        summary: "Neo4j query latency is high"
+        description: "95th percentile query latency is {{ $value }}s (threshold: 5s)"
