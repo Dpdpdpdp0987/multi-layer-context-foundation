@@ -1,10 +1,5 @@
-"""
-Model Context Protocol server implementation.
-"""
+"""MCP server module for Multi-Layer Context Foundation."""
 
-try:
-    from mlcf.mcp.server import MCPContextServer
-except ImportError:
-    MCPContextServer = None
+from mlcf.mcp.server import MCPContextServer
 
 __all__ = ["MCPContextServer"]

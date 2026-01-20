@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "mlcf-context": {
+      "command": "python",
+      "args": ["-m", "mlcf.mcp.server"],
+      "env": {
+        "MLCF_CONFIG_PATH": "./config/mlcf_config.yaml"
+      },
+      "description": "Multi-Layer Context Foundation MCP Server",
+      "features": {
+        "resources": true,
+        "tools": true,
+        "prompts": true
+      }
+    }
+  }
+}
