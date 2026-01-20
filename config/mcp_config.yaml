@@ -1,0 +1,119 @@
+# MCP Server Configuration
+
+server:
+  name: "mlcf-context-server"
+  version: "1.0.0"
+  description: "Multi-Layer Context Foundation MCP Server"
+  
+  # Server settings
+  transport: "stdio"  # stdio or http
+  host: "localhost"  # For HTTP transport
+  port: 3000  # For HTTP transport
+
+# Feature flags
+features:
+  enable_vector_search: true
+  enable_graph_search: true
+  enable_hybrid_retrieval: true
+  enable_entity_extraction: true
+
+# Context orchestrator settings
+orchestrator:
+  immediate_buffer_size: 10
+  immediate_buffer_ttl: 3600  # 1 hour
+  session_max_size: 50
+  session_consolidation_threshold: 100
+  max_context_tokens: 4096
+  enable_caching: true
+  cache_ttl: 300  # 5 minutes
+
+# Vector database configuration
+qdrant_config:
+  host: "localhost"
+  port: 6333
+  collection_name: "mlcf_mcp_vectors"
+  embedding_dim: 384
+
+# Graph database configuration
+neo4j_config:
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "password"
+  database: "neo4j"
+
+# Retrieval configuration
+retrieval_config:
+  semantic_weight: 0.5
+  keyword_weight: 0.3
+  graph_weight: 0.2
+  
+  # BM25 settings
+  bm25_k1: 1.5
+  bm25_b: 0.75
+  
+  # Chunking settings
+  chunk_size: 512
+  chunk_overlap: 50
+  adaptive_overlap: true
+  
+  # Reranking
+  reranking_enabled: false
+  reranking_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+# Embedding configuration
+embedding_config:
+  model: "sentence-transformers/all-MiniLM-L6-v2"
+  dimension: 384
+  device: "cpu"  # cpu, cuda, mps
+  batch_size: 32
+  normalize: true
+
+# Entity extraction configuration
+entity_extraction:
+  model: "en_core_web_sm"
+  min_confidence: 0.5
+  entity_types: null  # null = all types
+
+# Relationship mapping configuration
+relationship_mapping:
+  min_confidence: 0.5
+  dependency_based: true
+  pattern_based: true
+  cooccurrence_based: true
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+  
+  # Log destinations
+  log_to_file: true
+  log_file: "logs/mcp_server.log"
+  log_rotation: "500 MB"
+  log_retention: "10 days"
+
+# Performance
+performance:
+  # Connection pooling
+  max_connections: 100
+  
+  # Timeouts
+  query_timeout: 30  # seconds
+  connection_timeout: 10  # seconds
+  
+  # Rate limiting
+  enable_rate_limiting: false
+  requests_per_minute: 60
+
+# Security
+security:
+  # Authentication (if HTTP transport)
+  require_auth: false
+  api_key: null
+  
+  # Input validation
+  max_content_length: 10000  # characters
+  max_query_length: 500  # characters
+  
+  # Resource limits
+  max_results_per_query: 100
