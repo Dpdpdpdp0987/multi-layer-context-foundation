@@ -1,289 +1,168 @@
 #!/usr/bin/env python
 """
-Basic usage examples for Multi-Layer Context Foundation.
+Basic usage example for Multi-Layer Context Foundation.
 """
 
-import asyncio
-from mlcf import (
+from mlcf.core.orchestrator import (
     ContextOrchestrator,
-    OrchestratorConfig,
-    ContextRequest,
-    LayerType,
-    RetrievalStrategy
+    ContextType,
+    ContextPriority
 )
+from mlcf.core.config import Config
 
 
-async def basic_example():
-    """Basic storage and retrieval example."""
-    print("\n=== Basic Usage Example ===")
+def main():
+    """Demonstrate basic MLCF usage."""
+    print("=" * 60)
+    print("Multi-Layer Context Foundation - Basic Usage Example")
+    print("=" * 60)
+    print()
     
-    # Initialize orchestrator
-    config = OrchestratorConfig(
-        immediate_buffer_size=10,
-        session_max_size=50
-    )
-    orchestrator = ContextOrchestrator(config=config, enable_long_term=False)
-    
-    # Store some context
-    print("\nStoring context...")
-    
-    await orchestrator.store(
-        content="User prefers Python for backend development",
-        metadata={"type": "preference", "category": "programming"},
-        conversation_id="conv_1"
+    # Initialize configuration
+    config = Config(
+        short_term_max_size=10,
+        working_memory_max_size=50
     )
     
-    await orchestrator.store(
-        content="Currently working on a machine learning project using TensorFlow",
-        metadata={"type": "task", "importance": "high"},
-        conversation_id="conv_1"
-    )
+    # Create orchestrator
+    print("1. Initializing Context Orchestrator...")
+    orchestrator = ContextOrchestrator(config=config)
+    print(f"   ✓ Orchestrator initialized")
+    print()
     
-    await orchestrator.store(
-        content="Deadline for ML project is next Friday",
-        metadata={"type": "task", "importance": "critical"},
-        conversation_id="conv_1"
-    )
+    # Start a session
+    print("2. Starting new session...")
+    session_id = orchestrator.start_new_session()
+    print(f"   ✓ Session started: {session_id}")
+    print()
     
-    print("✓ Stored 3 context items")
+    # Add various types of context
+    print("3. Adding context items...")
+    
+    # Add conversational context (goes to immediate buffer)
+    orchestrator.add_context(
+        content="User asked about Python programming",
+        context_type=ContextType.CONVERSATION,
+        priority=ContextPriority.MEDIUM
+    )
+    print("   ✓ Added conversation context")
+    
+    # Add task context (goes to session memory)
+    orchestrator.add_context(
+        content="User is working on a machine learning project using scikit-learn",
+        context_type=ContextType.TASK,
+        priority=ContextPriority.HIGH,
+        metadata={"project": "ml_classifier", "framework": "scikit-learn"}
+    )
+    print("   ✓ Added task context")
+    
+    # Add factual knowledge (goes to persistent memory)
+    orchestrator.add_context(
+        content="User prefers Python over Java for data science tasks",
+        context_type=ContextType.PREFERENCE,
+        priority=ContextPriority.CRITICAL,
+        metadata={"category": "programming", "topic": "language_preference"}
+    )
+    print("   ✓ Added preference (fact)")
+    
+    # Add more conversational context
+    orchestrator.add_context(
+        content="User mentioned experience with pandas and numpy",
+        context_type=ContextType.CONVERSATION
+    )
+    print("   ✓ Added more conversation context")
+    print()
     
     # Retrieve relevant context
-    print("\nRetrieving context...")
+    print("4. Retrieving relevant context...")
+    query = "What programming language should I use for this project?"
+    print(f"   Query: '{query}'")
+    print()
     
-    request = ContextRequest(
-        query="What am I working on?",
+    results = orchestrator.retrieve_context(
+        query=query,
         max_results=5,
-        conversation_id="conv_1"
+        strategy="hybrid"
     )
     
-    response = await orchestrator.retrieve(request)
+    print(f"   Found {len(results)} relevant items:")
+    print()
+    for i, item in enumerate(results, 1):
+        print(f"   {i}. [{item.context_type.value}] (score: {item.relevance_score:.3f})")
+        print(f"      {item.content[:80]}..." if len(item.content) > 80 else f"      {item.content}")
+        print()
     
-    print(f"\nFound {len(response.items)} relevant items:")
-    for i, item in enumerate(response.items, 1):
-        print(f"\n{i}. [{item.metadata.get('type', 'unknown')}]")
-        print(f"   Content: {item.content}")
-        print(f"   Relevance: {item.relevance_score:.3f}")
-        print(f"   Importance: {item.importance_score:.3f}")
+    # Get active context within token budget
+    print("5. Getting active context (within token budget)...")
+    active_items, token_count = orchestrator.get_active_context(max_tokens=1000)
+    print(f"   ✓ Retrieved {len(active_items)} items using {token_count} tokens")
+    print()
     
-    # Show metrics
-    print("\n=== Metrics ===")
-    metrics = orchestrator.get_metrics()
-    print(f"Total stores: {metrics['storage']['total_stores']}")
-    print(f"Total retrievals: {metrics['retrieval']['total_retrievals']}")
-    print(f"Avg retrieval time: {metrics['retrieval']['avg_retrieval_time']:.3f}s")
-
-
-async def conversation_tracking_example():
-    """Example of tracking multiple conversations."""
-    print("\n\n=== Conversation Tracking Example ===")
+    # Show statistics
+    print("6. System statistics:")
+    stats = orchestrator.get_statistics()
+    print(f"   Immediate buffer: {stats['immediate_buffer_size']} items")
+    print(f"   Session memory: {stats['session_memory_size']} items")
+    print(f"   Token budget: {stats['context_budget_used']}/{stats['context_budget_max']} "
+          f"({stats['budget_usage_percent']:.1f}%)")
+    print()
     
-    orchestrator = ContextOrchestrator(enable_long_term=False)
+    # Demonstrate BM25 keyword search
+    print("7. BM25 Keyword Search Example...")
+    from mlcf.retrieval.bm25_search import BM25Search
     
-    # Conversation 1: Programming help
-    print("\nConversation 1: Programming Help")
-    await orchestrator.store(
-        "How do I handle exceptions in Python?",
-        conversation_id="programming_conv"
+    bm25 = BM25Search()
+    
+    # Index some documents
+    bm25.add_document(
+        "doc1",
+        "Python is excellent for machine learning with libraries like scikit-learn",
+        {"type": "tech"}
     )
-    await orchestrator.store(
-        "Use try-except blocks for exception handling",
-        conversation_id="programming_conv"
+    bm25.add_document(
+        "doc2",
+        "Java is widely used for enterprise applications",
+        {"type": "tech"}
     )
-    
-    # Conversation 2: Project planning
-    print("Conversation 2: Project Planning")
-    await orchestrator.store(
-        "What are the milestones for Q1?",
-        conversation_id="planning_conv"
-    )
-    await orchestrator.store(
-        "Q1 milestones: Launch MVP, Onboard 100 users, Achieve 95% uptime",
-        metadata={"type": "planning", "importance": "high"},
-        conversation_id="planning_conv"
-    )
-    
-    # Retrieve from specific conversation
-    print("\nRetrieving from planning conversation only...")
-    
-    request = ContextRequest(
-        query="milestones",
-        conversation_id="planning_conv",
-        max_results=10
+    bm25.add_document(
+        "doc3",
+        "Machine learning requires understanding of algorithms and data",
+        {"type": "tech"}
     )
     
-    response = await orchestrator.retrieve(request)
+    # Search
+    bm25_results = bm25.search("Python machine learning", max_results=3)
+    print(f"   Found {len(bm25_results)} documents:")
+    for i, result in enumerate(bm25_results, 1):
+        print(f"   {i}. (BM25 score: {result['score']:.3f})")
+        print(f"      {result['content']}")
+    print()
     
-    print(f"\nFound {len(response.items)} items in planning conversation:")
-    for item in response.items:
-        print(f"  - {item.content[:60]}...")
-
-
-async def importance_based_example():
-    """Example showing importance-based retention."""
-    print("\n\n=== Importance-Based Retention Example ===")
+    # Demonstrate adaptive chunking
+    print("8. Adaptive Chunking Example...")
+    from mlcf.retrieval.adaptive_chunking import AdaptiveChunker
     
-    config = OrchestratorConfig(
-        immediate_buffer_size=5,
-        session_max_size=10
-    )
-    orchestrator = ContextOrchestrator(config=config, enable_long_term=False)
+    chunker = AdaptiveChunker(chunk_size=100, base_overlap=20)
     
-    # Store items with different importance levels
-    print("\nStoring items with varying importance...")
-    
-    importances = ["low", "normal", "high", "critical"]
-    for i, importance in enumerate(importances):
-        await orchestrator.store(
-            f"Message with {importance} importance",
-            metadata={"importance": importance}
-        )
-    
-    # Add many low-importance items to trigger eviction
-    print("Adding many low-importance items to trigger eviction...")
-    for i in range(15):
-        await orchestrator.store(
-            f"Low priority item {i}",
-            metadata={"importance": "low"}
-        )
-    
-    # Retrieve all
-    request = ContextRequest(
-        query="importance",
-        max_results=20,
-        include_immediate=True,
-        include_session=True
+    long_text = (
+        "Natural language processing is a subfield of artificial intelligence. "
+        "It focuses on the interaction between computers and human language. "
+        "NLP techniques are used in many applications today. "
+        "Machine learning has greatly improved NLP capabilities. "
+        "Deep learning models like transformers have revolutionized the field."
     )
     
-    response = await orchestrator.retrieve(request)
+    chunks = chunker.chunk_text(long_text)
+    print(f"   Created {len(chunks)} chunks from {len(long_text)} characters")
+    for i, chunk in enumerate(chunks, 1):
+        print(f"   Chunk {i}: {len(chunk)} chars, overlap: {chunk.overlap_after}")
+        print(f"      {chunk.content[:60]}...")
+    print()
     
-    print(f"\nRetained {len(response.items)} items after eviction:")
-    for item in response.items:
-        imp = item.metadata.get('importance', 'unknown')
-        print(f"  - {item.content[:50]}... [importance: {imp}]")
-    
-    # High importance items should still be present
-    contents = [item.content for item in response.items]
-    assert any("critical" in c.lower() for c in contents), "Critical item was evicted!"
-    assert any("high" in c.lower() for c in contents), "High importance item was evicted!"
-    print("\n✓ High importance items retained despite eviction")
-
-
-async def layer_management_example():
-    """Example of explicit layer management."""
-    print("\n\n=== Layer Management Example ===")
-    
-    orchestrator = ContextOrchestrator(enable_long_term=False)
-    
-    # Explicitly target different layers
-    print("\nStoring in different layers...")
-    
-    # Immediate buffer (recent conversation)
-    await orchestrator.store(
-        "Just now: User asked about deployment",
-        layer_hint=LayerType.IMMEDIATE
-    )
-    print("  ✓ Stored in immediate buffer")
-    
-    # Session memory (active task)
-    await orchestrator.store(
-        "Current task: Deploy microservices to Kubernetes",
-        layer_hint=LayerType.SESSION,
-        metadata={"task_id": "deploy_123"}
-    )
-    print("  ✓ Stored in session memory")
-    
-    # Check buffer sizes
-    print(f"\nImmediate buffer size: {orchestrator.immediate_buffer.size}")
-    print(f"Session memory size: {orchestrator.session_memory.size}")
-    
-    # Retrieve from specific layer
-    print("\nRetrieving from immediate buffer only...")
-    request = ContextRequest(
-        query="deployment",
-        include_immediate=True,
-        include_session=False,
-        include_long_term=False
-    )
-    
-    response = await orchestrator.retrieve(request)
-    print(f"Found {len(response.items)} items in immediate buffer")
-    
-    # Clear specific layer
-    print("\nClearing immediate buffer...")
-    orchestrator.clear_immediate()
-    print(f"Immediate buffer size after clear: {orchestrator.immediate_buffer.size}")
-    print(f"Session memory size (unchanged): {orchestrator.session_memory.size}")
-
-
-async def retrieval_strategies_example():
-    """Example of different retrieval strategies."""
-    print("\n\n=== Retrieval Strategies Example ===")
-    
-    orchestrator = ContextOrchestrator(enable_long_term=False)
-    
-    # Store some test data
-    test_data = [
-        "Python is great for data science",
-        "Machine learning with Python and scikit-learn",
-        "Building REST APIs with FastAPI",
-        "Deep learning using TensorFlow and PyTorch",
-        "Data analysis with pandas and numpy"
-    ]
-    
-    for content in test_data:
-        await orchestrator.store(content)
-    
-    print("\nStored 5 items about Python and data science")
-    
-    # Try different strategies
-    query = "Python machine learning"
-    
-    # Recency-based
-    print(f"\nQuery: '{query}'")
-    print("\nStrategy 1: RECENCY (most recent first)")
-    request = ContextRequest(
-        query=query,
-        strategy=RetrievalStrategy.RECENCY,
-        max_results=3
-    )
-    response = await orchestrator.retrieve(request)
-    for item in response.items:
-        print(f"  - {item.content}")
-    
-    # Relevance-based
-    print("\nStrategy 2: RELEVANCE (best match)")
-    request = ContextRequest(
-        query=query,
-        strategy=RetrievalStrategy.RELEVANCE,
-        max_results=3
-    )
-    response = await orchestrator.retrieve(request)
-    for item in response.items:
-        print(f"  - {item.content}")
-
-
-async def main():
-    """Run all examples."""
-    print("\n" + "="*60)
-    print("Multi-Layer Context Foundation - Usage Examples")
-    print("="*60)
-    
-    try:
-        await basic_example()
-        await conversation_tracking_example()
-        await importance_based_example()
-        await layer_management_example()
-        await retrieval_strategies_example()
-        
-        print("\n" + "="*60)
-        print("All examples completed successfully!")
-        print("="*60 + "\n")
-        
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+    print("=" * 60)
+    print("Example completed successfully!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
