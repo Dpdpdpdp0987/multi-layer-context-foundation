@@ -1,551 +1,467 @@
 """
 Context Orchestrator - Central coordinator for multi-layer context management.
-
-The orchestrator manages the flow of information between different memory layers,
-handles context assembly, and coordinates retrieval strategies.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
-from loguru import logger
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field
-import asyncio
+from enum import Enum
+import uuid
+from loguru import logger
 
 from mlcf.memory.immediate_buffer import ImmediateContextBuffer
 from mlcf.memory.session_memory import SessionMemory
-from mlcf.memory.long_term_store import LongTermStore
-from mlcf.core.context_models import (
-    ContextItem,
-    ContextRequest,
-    ContextResponse,
-    ContextMetrics,
-    LayerType
-)
+from mlcf.memory.persistent_memory import PersistentMemory
+from mlcf.retrieval.hybrid_engine import HybridRetrievalEngine
+from mlcf.core.config import Config
+
+
+class ContextPriority(Enum):
+    """Priority levels for context items."""
+    CRITICAL = 1
+    HIGH = 2
+    MEDIUM = 3
+    LOW = 4
+
+
+class ContextType(Enum):
+    """Types of context."""
+    CONVERSATION = "conversation"
+    TASK = "task"
+    FACT = "fact"
+    PREFERENCE = "preference"
+    EVENT = "event"
+    ENTITY = "entity"
 
 
 @dataclass
-class OrchestratorConfig:
-    """Configuration for Context Orchestrator."""
+class ContextItem:
+    """Represents a single context item."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    content: str = ""
+    context_type: ContextType = ContextType.CONVERSATION
+    priority: ContextPriority = ContextPriority.MEDIUM
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    embedding: Optional[List[float]] = None
+    relevance_score: float = 1.0
+    access_count: int = 0
+    last_accessed: datetime = field(default_factory=datetime.utcnow)
+    expires_at: Optional[datetime] = None
     
-    # Buffer settings
-    immediate_buffer_size: int = 10
-    immediate_buffer_ttl: int = 3600  # 1 hour
+    def __post_init__(self):
+        """Post-initialization processing."""
+        if isinstance(self.context_type, str):
+            self.context_type = ContextType(self.context_type)
+        if isinstance(self.priority, int):
+            self.priority = ContextPriority(self.priority)
     
-    # Session settings
-    session_max_size: int = 50
-    session_consolidation_threshold: int = 100
+    def is_expired(self) -> bool:
+        """Check if context item has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.utcnow() > self.expires_at
     
-    # Context assembly
-    max_context_tokens: int = 4096
-    context_overlap_tokens: int = 128
+    def update_access(self):
+        """Update access tracking."""
+        self.access_count += 1
+        self.last_accessed = datetime.utcnow()
     
-    # Retrieval settings
-    default_retrieval_strategy: str = "hybrid"
-    enable_adaptive_retrieval: bool = True
-    
-    # Performance
-    enable_async: bool = True
-    enable_caching: bool = True
-    cache_ttl: int = 300  # 5 minutes
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "id": self.id,
+            "content": self.content,
+            "context_type": self.context_type.value,
+            "priority": self.priority.value,
+            "timestamp": self.timestamp.isoformat(),
+            "metadata": self.metadata,
+            "relevance_score": self.relevance_score,
+            "access_count": self.access_count,
+            "last_accessed": self.last_accessed.isoformat(),
+        }
 
 
 class ContextOrchestrator:
     """
     Central orchestrator for multi-layer context management.
     
-    Responsibilities:
-    - Coordinate between memory layers (Immediate, Session, Long-term)
-    - Assemble context for LLM consumption
-    - Route storage and retrieval requests
-    - Optimize context window usage
-    - Track context metrics and performance
+    Coordinates between immediate buffer, session memory, and persistent storage.
+    Implements intelligent context promotion, eviction, and retrieval strategies.
     """
     
-    def __init__(
-        self,
-        config: Optional[OrchestratorConfig] = None,
-        enable_long_term: bool = True
-    ):
+    def __init__(self, config: Optional[Config] = None):
         """
-        Initialize the Context Orchestrator.
+        Initialize the context orchestrator.
         
         Args:
-            config: Orchestrator configuration
-            enable_long_term: Whether to enable long-term storage
+            config: Configuration object
         """
-        self.config = config or OrchestratorConfig()
-        self.enable_long_term = enable_long_term
+        self.config = config or Config()
         
         # Initialize memory layers
         self.immediate_buffer = ImmediateContextBuffer(
-            max_size=self.config.immediate_buffer_size,
-            ttl_seconds=self.config.immediate_buffer_ttl
+            max_size=self.config.short_term_max_size,
+            max_tokens=self.config.memory_config.get("immediate_max_tokens", 2048)
         )
         
         self.session_memory = SessionMemory(
-            max_size=self.config.session_max_size,
-            consolidation_threshold=self.config.session_consolidation_threshold
+            max_size=self.config.working_memory_max_size,
+            relevance_threshold=self.config.memory_config.relevance_threshold,
+            session_timeout=timedelta(hours=2)
         )
         
-        self.long_term_store = None
-        if enable_long_term:
-            self.long_term_store = LongTermStore()
+        self.persistent_memory = PersistentMemory(
+            config=self.config.database_config
+        )
         
-        # Context cache
-        self._context_cache: Dict[str, Tuple[ContextResponse, datetime]] = {}
+        # Initialize retrieval engine
+        self.retrieval_engine = HybridRetrievalEngine(
+            config=self.config.retrieval_config,
+            embedding_config=self.config.embedding_config
+        )
         
-        # Metrics
-        self.metrics = ContextMetrics()
+        # State tracking
+        self.current_session_id: Optional[str] = None
+        self.context_budget_used: int = 0
+        self.max_context_budget: int = self.config.memory_config.get("max_context_tokens", 4096)
         
         logger.info("ContextOrchestrator initialized")
     
-    async def store(
+    def add_context(
         self,
         content: str,
+        context_type: ContextType = ContextType.CONVERSATION,
+        priority: ContextPriority = ContextPriority.MEDIUM,
         metadata: Optional[Dict[str, Any]] = None,
-        layer_hint: Optional[LayerType] = None,
-        conversation_id: Optional[str] = None
-    ) -> ContextItem:
+        layer: str = "auto"
+    ) -> str:
         """
-        Store content in appropriate memory layer(s).
+        Add context to appropriate memory layer.
         
         Args:
-            content: Content to store
+            content: Context content
+            context_type: Type of context
+            priority: Priority level
             metadata: Additional metadata
-            layer_hint: Suggested target layer (auto-determined if None)
-            conversation_id: ID for conversation grouping
+            layer: Target layer (auto, immediate, session, persistent)
             
         Returns:
-            ContextItem with storage details
+            Context item ID
         """
-        start_time = datetime.utcnow()
-        metadata = metadata or {}
-        
         # Create context item
         item = ContextItem(
             content=content,
-            metadata=metadata,
-            conversation_id=conversation_id,
-            timestamp=start_time
+            context_type=context_type,
+            priority=priority,
+            metadata=metadata or {}
         )
         
-        # Determine target layer(s)
-        if layer_hint:
-            target_layers = [layer_hint]
+        # Determine target layer
+        if layer == "auto":
+            layer = self._determine_layer(item)
+        
+        # Add to appropriate layer
+        if layer == "immediate":
+            self.immediate_buffer.add(item)
+            logger.debug(f"Added to immediate buffer: {item.id}")
+        elif layer == "session":
+            self.session_memory.add(item)
+            logger.debug(f"Added to session memory: {item.id}")
+        elif layer == "persistent":
+            self.persistent_memory.add(item)
+            logger.debug(f"Added to persistent memory: {item.id}")
         else:
-            target_layers = self._determine_storage_layers(item)
+            raise ValueError(f"Unknown layer: {layer}")
         
-        # Store in each layer
-        for layer in target_layers:
-            if layer == LayerType.IMMEDIATE:
-                self.immediate_buffer.add(item)
-                logger.debug(f"Stored in immediate buffer: {item.id}")
-            
-            elif layer == LayerType.SESSION:
-                self.session_memory.add(item)
-                logger.debug(f"Stored in session memory: {item.id}")
-            
-            elif layer == LayerType.LONG_TERM and self.long_term_store:
-                if self.config.enable_async:
-                    asyncio.create_task(self.long_term_store.add_async(item))
-                else:
-                    await self.long_term_store.add_async(item)
-                logger.debug(f"Stored in long-term: {item.id}")
+        # Check for promotion opportunities
+        self._check_promotion(item)
         
-        # Update metrics
-        elapsed = (datetime.utcnow() - start_time).total_seconds()
-        self.metrics.record_storage(elapsed, target_layers)
+        # Update context budget
+        self._update_context_budget()
         
-        # Invalidate cache
-        if self.config.enable_caching:
-            self._invalidate_cache()
-        
-        return item
+        return item.id
     
-    def store_sync(
+    def retrieve_context(
         self,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-        layer_hint: Optional[LayerType] = None,
-        conversation_id: Optional[str] = None
-    ) -> ContextItem:
-        """Synchronous version of store."""
-        return asyncio.run(self.store(content, metadata, layer_hint, conversation_id))
-    
-    async def retrieve(
-        self,
-        request: ContextRequest
-    ) -> ContextResponse:
-        """
-        Retrieve and assemble context based on request.
-        
-        Args:
-            request: Context retrieval request
-            
-        Returns:
-            Assembled context response
-        """
-        start_time = datetime.utcnow()
-        
-        # Check cache
-        if self.config.enable_caching:
-            cached = self._get_from_cache(request.cache_key)
-            if cached:
-                logger.debug(f"Cache hit for: {request.query}")
-                self.metrics.record_cache_hit()
-                return cached
-            self.metrics.record_cache_miss()
-        
-        # Retrieve from each layer
-        immediate_results = self._retrieve_from_immediate(request)
-        session_results = self._retrieve_from_session(request)
-        long_term_results = []
-        
-        if self.long_term_store and request.include_long_term:
-            long_term_results = await self._retrieve_from_long_term(request)
-        
-        # Assemble and rank results
-        assembled_context = self._assemble_context(
-            immediate_results,
-            session_results,
-            long_term_results,
-            request
-        )
-        
-        # Create response
-        response = ContextResponse(
-            items=assembled_context,
-            query=request.query,
-            strategy=request.strategy,
-            total_retrieved=len(immediate_results) + len(session_results) + len(long_term_results),
-            metadata={
-                "immediate_count": len(immediate_results),
-                "session_count": len(session_results),
-                "long_term_count": len(long_term_results),
-                "cache_hit": False
-            }
-        )
-        
-        # Update cache
-        if self.config.enable_caching:
-            self._add_to_cache(request.cache_key, response)
-        
-        # Update metrics
-        elapsed = (datetime.utcnow() - start_time).total_seconds()
-        self.metrics.record_retrieval(elapsed, len(assembled_context))
-        
-        return response
-    
-    def retrieve_sync(self, request: ContextRequest) -> ContextResponse:
-        """Synchronous version of retrieve."""
-        return asyncio.run(self.retrieve(request))
-    
-    def _determine_storage_layers(self, item: ContextItem) -> List[LayerType]:
-        """
-        Determine which layer(s) should store this item.
-        
-        Logic:
-        - All items go to immediate buffer
-        - Important items go to session memory
-        - Permanent items go to long-term storage
-        """
-        layers = [LayerType.IMMEDIATE]
-        
-        importance = item.metadata.get("importance", "normal")
-        item_type = item.metadata.get("type", "general")
-        persistence = item.metadata.get("persistence", "session")
-        
-        # Session memory criteria
-        if importance in ["high", "critical"] or item_type in ["task", "decision", "preference"]:
-            layers.append(LayerType.SESSION)
-        
-        # Long-term storage criteria
-        if persistence == "permanent" or item_type in ["fact", "knowledge", "preference"]:
-            if self.enable_long_term:
-                layers.append(LayerType.LONG_TERM)
-        
-        return layers
-    
-    def _retrieve_from_immediate(self, request: ContextRequest) -> List[ContextItem]:
-        """Retrieve from immediate context buffer."""
-        if not request.include_immediate:
-            return []
-        
-        # Get recent items
-        results = self.immediate_buffer.get_recent(
-            max_items=request.max_results,
-            conversation_id=request.conversation_id
-        )
-        
-        # Apply query filtering if needed
-        if request.query:
-            results = [
-                item for item in results
-                if self._matches_query(item, request.query)
-            ]
-        
-        return results
-    
-    def _retrieve_from_session(self, request: ContextRequest) -> List[ContextItem]:
-        """Retrieve from session memory."""
-        if not request.include_session:
-            return []
-        
-        # Search session memory
-        results = self.session_memory.search(
-            query=request.query,
-            max_results=request.max_results,
-            filters=request.filters,
-            conversation_id=request.conversation_id
-        )
-        
-        return results
-    
-    async def _retrieve_from_long_term(self, request: ContextRequest) -> List[ContextItem]:
-        """Retrieve from long-term storage."""
-        if not self.long_term_store:
-            return []
-        
-        # Perform hybrid retrieval
-        results = await self.long_term_store.search(
-            query=request.query,
-            max_results=request.max_results,
-            strategy=request.strategy,
-            filters=request.filters
-        )
-        
-        return results
-    
-    def _assemble_context(
-        self,
-        immediate: List[ContextItem],
-        session: List[ContextItem],
-        long_term: List[ContextItem],
-        request: ContextRequest
+        query: str,
+        max_results: int = 10,
+        strategy: str = "hybrid",
+        time_decay: bool = True,
+        filters: Optional[Dict[str, Any]] = None
     ) -> List[ContextItem]:
         """
-        Assemble and rank context from all layers.
+        Retrieve relevant context from all layers.
         
-        Strategy:
-        1. Combine results from all layers
-        2. Remove duplicates
-        3. Rank by relevance and recency
-        4. Limit by token budget
+        Args:
+            query: Search query
+            max_results: Maximum number of results
+            strategy: Retrieval strategy
+            time_decay: Apply time-based decay to scores
+            filters: Optional filters
+            
+        Returns:
+            List of relevant context items
         """
-        # Combine all results
-        all_items: List[Tuple[ContextItem, float, LayerType]] = []
+        results = []
         
-        # Add immediate buffer items (highest priority)
-        for item in immediate:
-            score = self._calculate_score(item, request, LayerType.IMMEDIATE)
-            all_items.append((item, score, LayerType.IMMEDIATE))
-        
-        # Add session memory items
-        for item in session:
-            score = self._calculate_score(item, request, LayerType.SESSION)
-            all_items.append((item, score, LayerType.SESSION))
-        
-        # Add long-term items
-        for item in long_term:
-            score = self._calculate_score(item, request, LayerType.LONG_TERM)
-            all_items.append((item, score, LayerType.LONG_TERM))
-        
-        # Remove duplicates (keep highest scoring version)
-        unique_items = self._deduplicate(all_items)
-        
-        # Sort by score
-        unique_items.sort(key=lambda x: x[1], reverse=True)
-        
-        # Apply token budget if specified
-        if request.max_tokens:
-            final_items = self._apply_token_budget(
-                unique_items,
-                request.max_tokens
-            )
-        else:
-            final_items = unique_items[:request.max_results]
-        
-        # Extract just the items (remove scores and layers)
-        return [item for item, score, layer in final_items]
-    
-    def _calculate_score(
-        self,
-        item: ContextItem,
-        request: ContextRequest,
-        layer: LayerType
-    ) -> float:
-        """
-        Calculate relevance score for an item.
-        
-        Factors:
-        - Layer weight (immediate > session > long-term)
-        - Recency
-        - Query relevance
-        - Metadata importance
-        """
-        # Base layer weights
-        layer_weights = {
-            LayerType.IMMEDIATE: 1.0,
-            LayerType.SESSION: 0.8,
-            LayerType.LONG_TERM: 0.6
-        }
-        
-        score = layer_weights.get(layer, 0.5)
-        
-        # Recency bonus (decay over time)
-        if item.timestamp:
-            age_hours = (datetime.utcnow() - item.timestamp).total_seconds() / 3600
-            recency_factor = 1.0 / (1.0 + age_hours / 24)  # Decay over days
-            score *= recency_factor
-        
-        # Query relevance (simple keyword matching for now)
-        if request.query:
-            relevance = self._calculate_relevance(item.content, request.query)
-            score *= (0.5 + 0.5 * relevance)  # Scale between 0.5 and 1.0
-        
-        # Importance metadata
-        importance_map = {
-            "critical": 1.5,
-            "high": 1.2,
-            "normal": 1.0,
-            "low": 0.8
-        }
-        importance = item.metadata.get("importance", "normal")
-        score *= importance_map.get(importance, 1.0)
-        
-        return score
-    
-    def _calculate_relevance(self, content: str, query: str) -> float:
-        """Calculate simple keyword-based relevance."""
-        content_lower = content.lower()
-        query_lower = query.lower()
-        
-        query_words = set(query_lower.split())
-        content_words = set(content_lower.split())
-        
-        if not query_words:
-            return 0.0
-        
-        # Jaccard similarity
-        intersection = len(query_words & content_words)
-        union = len(query_words | content_words)
-        
-        return intersection / union if union > 0 else 0.0
-    
-    def _matches_query(self, item: ContextItem, query: str) -> bool:
-        """Check if item matches query (simple keyword matching)."""
-        return any(
-            word.lower() in item.content.lower()
-            for word in query.split()
+        # Search immediate buffer (always include recent context)
+        immediate_results = self.immediate_buffer.search(
+            query=query,
+            max_results=max_results
         )
+        results.extend(immediate_results)
+        
+        # Search session memory
+        session_results = self.session_memory.search(
+            query=query,
+            max_results=max_results,
+            filters=filters
+        )
+        results.extend(session_results)
+        
+        # Search persistent memory using hybrid retrieval
+        persistent_results = self.retrieval_engine.retrieve(
+            query=query,
+            max_results=max_results * 2,  # Retrieve more for better fusion
+            strategy=strategy,
+            filters=filters
+        )
+        
+        # Convert to ContextItems
+        for result in persistent_results:
+            item = self._result_to_context_item(result)
+            results.append(item)
+        
+        # Apply time decay if requested
+        if time_decay:
+            results = self._apply_time_decay(results)
+        
+        # Deduplicate and merge scores
+        results = self._deduplicate_results(results)
+        
+        # Sort by combined score
+        results.sort(
+            key=lambda x: x.relevance_score,
+            reverse=True
+        )
+        
+        # Update access tracking
+        for item in results[:max_results]:
+            item.update_access()
+        
+        return results[:max_results]
     
-    def _deduplicate(
+    def get_active_context(
         self,
-        items: List[Tuple[ContextItem, float, LayerType]]
-    ) -> List[Tuple[ContextItem, float, LayerType]]:
-        """Remove duplicate items, keeping highest scoring version."""
-        seen_ids = set()
-        seen_content = {}  # content hash -> (item, score, layer)
+        max_tokens: Optional[int] = None
+    ) -> Tuple[List[ContextItem], int]:
+        """
+        Get currently active context within token budget.
         
-        unique_items = []
-        
-        for item, score, layer in items:
-            # Skip if we've seen this exact ID
-            if item.id in seen_ids:
-                continue
+        Args:
+            max_tokens: Maximum token budget (uses default if None)
             
-            # Check for content duplication
-            content_hash = hash(item.content.strip().lower())
-            
-            if content_hash in seen_content:
-                # Keep the higher scoring version
-                existing_score = seen_content[content_hash][1]
-                if score > existing_score:
-                    # Remove old version
-                    unique_items = [
-                        x for x in unique_items
-                        if x[0].content.strip().lower() != item.content.strip().lower()
-                    ]
-                    seen_content[content_hash] = (item, score, layer)
-                    unique_items.append((item, score, layer))
-                    seen_ids.add(item.id)
-            else:
-                seen_content[content_hash] = (item, score, layer)
-                unique_items.append((item, score, layer))
-                seen_ids.add(item.id)
+        Returns:
+            Tuple of (context items, total tokens used)
+        """
+        max_tokens = max_tokens or self.max_context_budget
         
-        return unique_items
-    
-    def _apply_token_budget(
-        self,
-        items: List[Tuple[ContextItem, float, LayerType]],
-        max_tokens: int
-    ) -> List[Tuple[ContextItem, float, LayerType]]:
-        """Limit items to fit within token budget."""
-        total_tokens = 0
+        # Get all immediate buffer items (highest priority)
+        immediate_items = self.immediate_buffer.get_all()
+        
+        # Get relevant session items
+        session_items = self.session_memory.get_active_items()
+        
+        # Combine and sort by priority and recency
+        all_items = immediate_items + session_items
+        all_items.sort(
+            key=lambda x: (x.priority.value, -x.timestamp.timestamp())
+        )
+        
+        # Pack within token budget
         selected_items = []
+        total_tokens = 0
         
-        for item, score, layer in items:
-            # Rough estimate: 1 token ≈ 4 characters
-            item_tokens = len(item.content) // 4
+        for item in all_items:
+            item_tokens = self._estimate_tokens(item.content)
             
             if total_tokens + item_tokens <= max_tokens:
-                selected_items.append((item, score, layer))
+                selected_items.append(item)
                 total_tokens += item_tokens
             else:
-                # Budget exceeded
                 break
         
-        return selected_items
+        return selected_items, total_tokens
     
-    def _get_from_cache(self, key: str) -> Optional[ContextResponse]:
-        """Get response from cache if valid."""
-        if key not in self._context_cache:
-            return None
-        
-        response, cached_at = self._context_cache[key]
-        age = (datetime.utcnow() - cached_at).total_seconds()
-        
-        if age > self.config.cache_ttl:
-            # Cache expired
-            del self._context_cache[key]
-            return None
-        
-        response.metadata["cache_hit"] = True
-        return response
-    
-    def _add_to_cache(self, key: str, response: ContextResponse):
-        """Add response to cache."""
-        self._context_cache[key] = (response, datetime.utcnow())
-        
-        # Simple cache size limit
-        if len(self._context_cache) > 100:
-            # Remove oldest entries
-            sorted_items = sorted(
-                self._context_cache.items(),
-                key=lambda x: x[1][1]
-            )
-            for k, _ in sorted_items[:20]:
-                del self._context_cache[k]
-    
-    def _invalidate_cache(self):
-        """Invalidate entire cache."""
-        self._context_cache.clear()
-    
-    def clear_immediate(self):
+    def clear_immediate_buffer(self):
         """Clear immediate context buffer."""
         self.immediate_buffer.clear()
         logger.info("Immediate buffer cleared")
     
-    def clear_session(self, conversation_id: Optional[str] = None):
+    def clear_session(self, session_id: Optional[str] = None):
         """Clear session memory."""
-        if conversation_id:
-            self.session_memory.clear_conversation(conversation_id)
-            logger.info(f"Session cleared for conversation: {conversation_id}")
-        else:
-            self.session_memory.clear()
-            logger.info("All session memory cleared")
+        self.session_memory.clear(session_id)
+        logger.info(f"Session memory cleared: {session_id or 'current'}")
     
-    def get_metrics(self) -> Dict[str, Any]:
-        """Get orchestrator metrics."""
-        return self.metrics.to_dict()
+    def start_new_session(self, session_id: Optional[str] = None) -> str:
+        """Start a new session."""
+        session_id = session_id or str(uuid.uuid4())
+        self.current_session_id = session_id
+        self.session_memory.start_session(session_id)
+        logger.info(f"Started new session: {session_id}")
+        return session_id
+    
+    def _determine_layer(self, item: ContextItem) -> str:
+        """
+        Determine appropriate layer for context item.
+        
+        Args:
+            item: Context item to classify
+            
+        Returns:
+            Layer name
+        """
+        # Critical priority or facts always go to persistent
+        if item.priority == ContextPriority.CRITICAL:
+            return "persistent"
+        
+        if item.context_type in [ContextType.FACT, ContextType.PREFERENCE]:
+            return "persistent"
+        
+        # Tasks and events go to session
+        if item.context_type in [ContextType.TASK, ContextType.EVENT]:
+            return "session"
+        
+        # Recent conversation goes to immediate
+        if item.context_type == ContextType.CONVERSATION:
+            return "immediate"
+        
+        # Default to session
+        return "session"
+    
+    def _check_promotion(self, item: ContextItem):
+        """
+        Check if item should be promoted to higher layer.
+        
+        Args:
+            item: Context item to check
+        """
+        # Promote frequently accessed items
+        if item.access_count > 5:
+            # Consider promoting to persistent
+            if item.context_type in [ContextType.FACT, ContextType.PREFERENCE]:
+                self.persistent_memory.add(item)
+                logger.debug(f"Promoted item to persistent: {item.id}")
+    
+    def _update_context_budget(self):
+        """Update context budget tracking."""
+        active_items, total_tokens = self.get_active_context()
+        self.context_budget_used = total_tokens
+        
+        # Log warning if approaching budget
+        usage_percent = (total_tokens / self.max_context_budget) * 100
+        if usage_percent > 80:
+            logger.warning(
+                f"Context budget at {usage_percent:.1f}% ({total_tokens}/{self.max_context_budget} tokens)"
+            )
+    
+    def _apply_time_decay(self, items: List[ContextItem]) -> List[ContextItem]:
+        """
+        Apply time-based decay to relevance scores.
+        
+        Args:
+            items: Context items
+            
+        Returns:
+            Items with updated scores
+        """
+        now = datetime.utcnow()
+        
+        for item in items:
+            # Calculate age in hours
+            age_hours = (now - item.timestamp).total_seconds() / 3600
+            
+            # Apply exponential decay
+            # Half-life of 24 hours
+            decay_factor = 0.5 ** (age_hours / 24)
+            
+            # Update relevance score
+            item.relevance_score *= decay_factor
+        
+        return items
+    
+    def _deduplicate_results(self, items: List[ContextItem]) -> List[ContextItem]:
+        """
+        Remove duplicate items, keeping highest scoring version.
+        
+        Args:
+            items: Context items
+            
+        Returns:
+            Deduplicated items
+        """
+        seen_ids = {}
+        deduplicated = []
+        
+        for item in items:
+            if item.id not in seen_ids:
+                seen_ids[item.id] = item
+                deduplicated.append(item)
+            else:
+                # Keep version with higher score
+                existing = seen_ids[item.id]
+                if item.relevance_score > existing.relevance_score:
+                    seen_ids[item.id] = item
+                    deduplicated.remove(existing)
+                    deduplicated.append(item)
+        
+        return deduplicated
+    
+    def _result_to_context_item(self, result: Dict[str, Any]) -> ContextItem:
+        """
+        Convert retrieval result to ContextItem.
+        
+        Args:
+            result: Retrieval result dictionary
+            
+        Returns:
+            ContextItem instance
+        """
+        return ContextItem(
+            id=result.get("id", str(uuid.uuid4())),
+            content=result.get("content", ""),
+            context_type=ContextType(result.get("type", "conversation")),
+            priority=ContextPriority.MEDIUM,
+            metadata=result.get("metadata", {}),
+            relevance_score=result.get("score", 0.0)
+        )
+    
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        Estimate token count for text.
+        
+        Args:
+            text: Input text
+            
+        Returns:
+            Estimated token count
+        """
+        # Simple estimation: ~4 characters per token
+        return len(text) // 4
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """
+        Get orchestrator statistics.
+        
+        Returns:
+            Statistics dictionary
+        """
+        return {
+            "immediate_buffer_size": len(self.immediate_buffer.get_all()),
+            "session_memory_size": len(self.session_memory.get_all()),
+            "current_session_id": self.current_session_id,
+            "context_budget_used": self.context_budget_used,
+            "context_budget_max": self.max_context_budget,
+            "budget_usage_percent": (self.context_budget_used / self.max_context_budget) * 100,
+        }
