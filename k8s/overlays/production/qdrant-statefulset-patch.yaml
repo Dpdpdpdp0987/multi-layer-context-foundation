@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: context-foundation
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+      - name: qdrant
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2000m"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: qdrant-storage
+    spec:
+      resources:
+        requests:
+          storage: 500Gi

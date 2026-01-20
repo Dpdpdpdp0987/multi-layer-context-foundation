@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: neo4j
+  namespace: context-foundation
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+      - name: neo4j
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4000m"
+          limits:
+            memory: "16Gi"
+            cpu: "8000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: neo4j-data
+    spec:
+      resources:
+        requests:
+          storage: 1Ti

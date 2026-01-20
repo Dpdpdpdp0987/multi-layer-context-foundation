@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: context-foundation-dev
+
+bases:
+  - ../../
+
+patchesStrategicMerge:
+  - namespace-patch.yaml
+  - resource-limits-patch.yaml
+
+configMapGenerator:
+  - name: api-config
+    namespace: context-foundation-dev
+    behavior: merge
+    literals:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+
+replicas:
+  - name: context-api
+    count: 1
+
+images:
+  - name: ghcr.io/dpdpdpdp0987/context-api
+    newTag: dev
+
+commonLabels:
+  environment: development

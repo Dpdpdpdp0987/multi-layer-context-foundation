@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: context-foundation-dev
+  labels:
+    name: context-foundation-dev
+    environment: development
