@@ -1,0 +1,146 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: neo4j
+  namespace: mlcf
+  labels:
+    app: neo4j
+    component: graph-db
+spec:
+  serviceName: neo4j-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+        component: graph-db
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2004"
+    spec:
+      securityContext:
+        fsGroup: 7474
+        runAsNonRoot: true
+        runAsUser: 7474
+      
+      initContainers:
+      - name: init-plugins
+        image: neo4j:5.14-enterprise
+        command:
+        - sh
+        - -c
+        - |
+          cp /var/lib/neo4j/labs/apoc-*-core.jar /plugins/
+        volumeMounts:
+        - name: plugins
+          mountPath: /plugins
+      
+      containers:
+      - name: neo4j
+        image: neo4j:5.14-enterprise
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - name: http
+          containerPort: 7474
+          protocol: TCP
+        - name: bolt
+          containerPort: 7687
+          protocol: TCP
+        - name: metrics
+          containerPort: 2004
+          protocol: TCP
+        
+        envFrom:
+        - configMapRef:
+            name: neo4j-config
+        - secretRef:
+            name: neo4j-auth
+        
+        env:
+        - name: NEO4J_ACCEPT_LICENSE_AGREEMENT
+          value: "yes"
+        - name: NEO4J_dbms_mode
+          value: "CORE"
+        - name: NEO4J_causal__clustering_minimum__core__cluster__size__at__formation
+          value: "3"
+        - name: NEO4J_causal__clustering_minimum__core__cluster__size__at__runtime
+          value: "3"
+        - name: NEO4J_causal__clustering_initial__discovery__members
+          value: "neo4j-0.neo4j-headless.mlcf.svc.cluster.local:5000,neo4j-1.neo4j-headless.mlcf.svc.cluster.local:5000,neo4j-2.neo4j-headless.mlcf.svc.cluster.local:5000"
+        - name: NEO4J_dbms_security_procedures_unrestricted
+          value: "apoc.*"
+        - name: NEO4J_metrics_enabled
+          value: "true"
+        - name: NEO4J_metrics_prometheus_enabled
+          value: "true"
+        - name: NEO4J_metrics_prometheus_endpoint
+          value: "0.0.0.0:2004"
+        
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+        
+        livenessProbe:
+          tcpSocket:
+            port: bolt
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+        
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+        
+        volumeMounts:
+        - name: neo4j-data
+          mountPath: /data
+        - name: neo4j-logs
+          mountPath: /logs
+        - name: plugins
+          mountPath: /plugins
+      
+      volumes:
+      - name: plugins
+        emptyDir: {}
+      
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - neo4j
+            topologyKey: kubernetes.io/hostname
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: neo4j-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 100Gi
+  - metadata:
+      name: neo4j-logs
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 10Gi
