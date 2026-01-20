@@ -1,0 +1,134 @@
+---
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: mlcf-gateway
+  namespace: mlcf
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: mlcf-tls-cert
+    hosts:
+    - "api.mlcf.example.com"
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    tls:
+      httpsRedirect: true
+    hosts:
+    - "api.mlcf.example.com"
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: mlcf-api
+  namespace: mlcf
+spec:
+  hosts:
+  - "api.mlcf.example.com"
+  gateways:
+  - mlcf-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /api/v1
+    route:
+    - destination:
+        host: mlcf-api
+        port:
+          number: 80
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+  - match:
+    - uri:
+        prefix: /health
+    route:
+    - destination:
+        host: mlcf-api
+        port:
+          number: 80
+    timeout: 5s
+  - match:
+    - uri:
+        prefix: /docs
+    - uri:
+        prefix: /redoc
+    - uri:
+        prefix: /openapi.json
+    route:
+    - destination:
+        host: mlcf-api
+        port:
+          number: 80
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: mlcf-api
+  namespace: mlcf
+spec:
+  host: mlcf-api
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 2
+    loadBalancer:
+      simple: LEAST_REQUEST
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: mlcf
+spec:
+  mtls:
+    mode: STRICT
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: mlcf-api-authz
+  namespace: mlcf
+spec:
+  selector:
+    matchLabels:
+      app: mlcf-api
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces: ["istio-system", "mlcf"]
+  - to:
+    - operation:
+        paths: ["/health/*", "/metrics"]
+  - to:
+    - operation:
+        paths: ["/api/*"]
+    when:
+    - key: request.headers[authorization]
+      notValues: [""]
