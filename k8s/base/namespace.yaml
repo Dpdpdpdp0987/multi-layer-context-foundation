@@ -1,0 +1,12 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mlcf
+  labels:
+    name: mlcf
+    istio-injection: enabled  # Enable Istio sidecar injection
+    monitoring: "true"
+    environment: production
+  annotations:
+    description: "Multi-Layer Context Foundation System"
