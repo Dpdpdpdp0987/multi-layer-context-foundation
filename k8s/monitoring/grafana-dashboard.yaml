@@ -1,89 +1,199 @@
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: mlcf-dashboard
-  namespace: monitoring
+  name: context-foundation-dashboard
+  namespace: context-foundation
   labels:
     grafana_dashboard: "1"
 data:
-  mlcf-dashboard.json: |
+  context-foundation-dashboard.json: |
     {
       "dashboard": {
-        "title": "MLCF System Overview",
-        "tags": ["mlcf", "context-management"],
+        "title": "Context Foundation - System Overview",
+        "tags": ["context-foundation", "api", "vector-db", "graph-db"],
         "timezone": "browser",
+        "schemaVersion": 16,
+        "version": 1,
+        "refresh": "30s",
         "panels": [
           {
-            "title": "Request Rate",
+            "id": 1,
+            "title": "API Request Rate",
+            "type": "graph",
+            "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
             "targets": [
               {
-                "expr": "sum(rate(http_requests_total{job='mlcf-api'}[5m]))",
-                "legendFormat": "Requests/sec"
+                "expr": "sum(rate(http_requests_total{job=\"context-api\"}[5m])) by (status)",
+                "legendFormat": "{{status}}"
               }
-            ],
-            "type": "graph"
+            ]
           },
           {
-            "title": "Error Rate",
+            "id": 2,
+            "title": "API Response Time (95th percentile)",
+            "type": "graph",
+            "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
             "targets": [
               {
-                "expr": "sum(rate(http_requests_total{job='mlcf-api',status=~'5..'}[5m])) / sum(rate(http_requests_total{job='mlcf-api'}[5m]))",
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"context-api\"}[5m])) by (le, path))",
+                "legendFormat": "{{path}}"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "API Error Rate",
+            "type": "graph",
+            "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{job=\"context-api\",status=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=\"context-api\"}[5m]))",
                 "legendFormat": "Error Rate"
               }
-            ],
-            "type": "graph"
+            ]
           },
           {
-            "title": "Response Time (p95)",
+            "id": 4,
+            "title": "API Pod Count",
+            "type": "stat",
+            "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4},
             "targets": [
               {
-                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job='mlcf-api'}[5m])) by (le))",
-                "legendFormat": "p95 latency"
+                "expr": "kube_deployment_status_replicas_available{deployment=\"context-api\",namespace=\"context-foundation\"}",
+                "legendFormat": "Available"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "API Memory Usage",
+            "type": "graph",
+            "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4},
+            "targets": [
+              {
+                "expr": "sum(container_memory_working_set_bytes{pod=~\"context-api-.*\",namespace=\"context-foundation\"}) / sum(container_spec_memory_limit_bytes{pod=~\"context-api-.*\",namespace=\"context-foundation\"})",
+                "legendFormat": "Memory Usage %"
+              }
+            ]
+          },
+          {
+            "id": 6,
+            "title": "Qdrant Vector Search Rate",
+            "type": "graph",
+            "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+            "targets": [
+              {
+                "expr": "sum(rate(qdrant_search_requests_total[5m]))",
+                "legendFormat": "Search Requests"
+              }
+            ]
+          },
+          {
+            "id": 7,
+            "title": "Qdrant Search Latency (95th percentile)",
+            "type": "graph",
+            "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(qdrant_search_duration_seconds_bucket[5m])) by (le))",
+                "legendFormat": "Search Latency"
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "title": "Qdrant Storage Usage",
+            "type": "gauge",
+            "gridPos": {"x": 0, "y": 24, "w": 8, "h": 6},
+            "targets": [
+              {
+                "expr": "sum(kubelet_volume_stats_used_bytes{namespace=\"context-foundation\",persistentvolumeclaim=~\"qdrant-storage-.*\"}) / sum(kubelet_volume_stats_capacity_bytes{namespace=\"context-foundation\",persistentvolumeclaim=~\"qdrant-storage-.*\"})",
+                "legendFormat": "Storage Usage %"
               }
             ],
-            "type": "graph"
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percentunit",
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {"value": 0, "color": "green"},
+                    {"value": 0.7, "color": "yellow"},
+                    {"value": 0.85, "color": "red"}
+                  ]
+                }
+              }
+            }
           },
           {
-            "title": "Active Pods",
+            "id": 9,
+            "title": "Neo4j Transaction Rate",
+            "type": "graph",
+            "gridPos": {"x": 8, "y": 24, "w": 8, "h": 6},
             "targets": [
               {
-                "expr": "kube_deployment_status_replicas_available{deployment='mlcf-api'}",
-                "legendFormat": "API Pods"
+                "expr": "sum(rate(neo4j_transaction_committed_total[5m]))",
+                "legendFormat": "Committed Transactions"
+              }
+            ]
+          },
+          {
+            "id": 10,
+            "title": "Neo4j Storage Usage",
+            "type": "gauge",
+            "gridPos": {"x": 16, "y": 24, "w": 8, "h": 6},
+            "targets": [
+              {
+                "expr": "sum(kubelet_volume_stats_used_bytes{namespace=\"context-foundation\",persistentvolumeclaim=~\"neo4j-data-.*\"}) / sum(kubelet_volume_stats_capacity_bytes{namespace=\"context-foundation\",persistentvolumeclaim=~\"neo4j-data-.*\"})",
+                "legendFormat": "Storage Usage %"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percentunit",
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {"value": 0, "color": "green"},
+                    {"value": 0.7, "color": "yellow"},
+                    {"value": 0.85, "color": "red"}
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "id": 11,
+            "title": "Neo4j Query Latency (95th percentile)",
+            "type": "graph",
+            "gridPos": {"x": 0, "y": 30, "w": 12, "h": 8},
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(neo4j_cypher_query_execution_latency_seconds_bucket[5m])) by (le))",
+                "legendFormat": "Query Latency"
+              }
+            ]
+          },
+          {
+            "id": 12,
+            "title": "Cluster Health Status",
+            "type": "stat",
+            "gridPos": {"x": 12, "y": 30, "w": 12, "h": 8},
+            "targets": [
+              {
+                "expr": "kube_deployment_status_replicas_available{deployment=\"context-api\",namespace=\"context-foundation\"} >= 2",
+                "legendFormat": "API Healthy"
               },
               {
-                "expr": "kube_statefulset_status_replicas_ready{statefulset='qdrant'}",
-                "legendFormat": "Qdrant Pods"
+                "expr": "kube_statefulset_status_replicas_ready{statefulset=\"qdrant\",namespace=\"context-foundation\"} >= 2",
+                "legendFormat": "Qdrant Healthy"
               },
               {
-                "expr": "kube_statefulset_status_replicas_ready{statefulset='neo4j'}",
-                "legendFormat": "Neo4j Pods"
+                "expr": "kube_statefulset_status_replicas_ready{statefulset=\"neo4j\",namespace=\"context-foundation\"} >= 2",
+                "legendFormat": "Neo4j Healthy"
               }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "Memory Usage",
-            "targets": [
-              {
-                "expr": "sum(container_memory_usage_bytes{pod=~'mlcf-api.*'}) by (pod)",
-                "legendFormat": "{{pod}}"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "CPU Usage",
-            "targets": [
-              {
-                "expr": "sum(rate(container_cpu_usage_seconds_total{pod=~'mlcf-api.*'}[5m])) by (pod)",
-                "legendFormat": "{{pod}}"
-              }
-            ],
-            "type": "graph"
+            ]
           }
-        ],
-        "schemaVersion": 16,
-        "version": 0
+        ]
       }
     }
