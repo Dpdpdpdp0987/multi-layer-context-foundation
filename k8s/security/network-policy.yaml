@@ -1,0 +1,207 @@
+# Default deny all ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: context-foundation
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+---
+# Allow API to receive traffic from Istio ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-ingress
+  namespace: context-foundation
+spec:
+  podSelector:
+    matchLabels:
+      app: context-api
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    - podSelector:
+        matchLabels:
+          app: context-api
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+# Allow API to connect to Qdrant
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-qdrant
+  namespace: context-foundation
+spec:
+  podSelector:
+    matchLabels:
+      app: qdrant
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: context-api
+    ports:
+    - protocol: TCP
+      port: 6333
+    - protocol: TCP
+      port: 6334
+---
+# Allow API to connect to Neo4j
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-neo4j
+  namespace: context-foundation
+spec:
+  podSelector:
+    matchLabels:
+      app: neo4j
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: context-api
+    ports:
+    - protocol: TCP
+      port: 7687
+    - protocol: TCP
+      port: 7474
+---
+# Allow Qdrant cluster communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-qdrant-cluster
+  namespace: context-foundation
+spec:
+  podSelector:
+    matchLabels:
+      app: qdrant
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: qdrant
+    ports:
+    - protocol: TCP
+      port: 6335
+---
+# Allow Neo4j cluster communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-neo4j-cluster
+  namespace: context-foundation
+spec:
+  podSelector:
+    matchLabels:
+      app: neo4j
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: neo4j
+    ports:
+    - protocol: TCP
+      port: 5000
+    - protocol: TCP
+      port: 6000
+    - protocol: TCP
+      port: 7000
+---
+# Allow Prometheus to scrape metrics
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scraping
+  namespace: context-foundation
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8000  # API metrics
+    - protocol: TCP
+      port: 6333  # Qdrant metrics
+    - protocol: TCP
+      port: 2004  # Neo4j metrics
+---
+# Default deny all egress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: context-foundation
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+---
+# Allow API egress to databases and DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-egress
+  namespace: context-foundation
+spec:
+  podSelector:
+    matchLabels:
+      app: context-api
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: qdrant
+    ports:
+    - protocol: TCP
+      port: 6333
+    - protocol: TCP
+      port: 6334
+  - to:
+    - podSelector:
+        matchLabels:
+          app: neo4j
+    ports:
+    - protocol: TCP
+      port: 7687
+    - protocol: TCP
+      port: 7474
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS for external APIs

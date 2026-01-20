@@ -1,18 +1,36 @@
----
+# ServiceAccount for API
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: mlcf-api
-  namespace: mlcf
+  name: context-api
+  namespace: context-foundation
   labels:
-    app: mlcf-api
-
+    app: context-api
 ---
+# ServiceAccount for Qdrant
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qdrant
+  namespace: context-foundation
+  labels:
+    app: qdrant
+---
+# ServiceAccount for Neo4j
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: neo4j
+  namespace: context-foundation
+  labels:
+    app: neo4j
+---
+# Role for API
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: mlcf-api-role
-  namespace: mlcf
+  name: context-api
+  namespace: context-foundation
 rules:
 - apiGroups: [""]
   resources: ["configmaps", "secrets"]
@@ -20,18 +38,114 @@ rules:
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "list"]
-
 ---
+# RoleBinding for API
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: mlcf-api-rolebinding
-  namespace: mlcf
+  name: context-api
+  namespace: context-foundation
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: mlcf-api-role
+  name: context-api
 subjects:
 - kind: ServiceAccount
-  name: mlcf-api
-  namespace: mlcf
+  name: context-api
+  namespace: context-foundation
+---
+# Role for Qdrant
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: qdrant
+  namespace: context-foundation
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch"]
+---
+# RoleBinding for Qdrant
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qdrant
+  namespace: context-foundation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: qdrant
+subjects:
+- kind: ServiceAccount
+  name: qdrant
+  namespace: context-foundation
+---
+# Role for Neo4j
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: neo4j
+  namespace: context-foundation
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch"]
+---
+# RoleBinding for Neo4j
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: neo4j
+  namespace: context-foundation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: neo4j
+subjects:
+- kind: ServiceAccount
+  name: neo4j
+  namespace: context-foundation
+---
+# ClusterRole for PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: context-foundation-psp
+rules:
+- apiGroups: ['policy']
+  resources: ['podsecuritypolicies']
+  verbs: ['use']
+  resourceNames:
+  - context-foundation-restricted
+---
+# ClusterRoleBinding for PSP
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: context-foundation-psp
+roleRef:
+  kind: ClusterRole
+  name: context-foundation-psp
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: context-api
+  namespace: context-foundation
+- kind: ServiceAccount
+  name: qdrant
+  namespace: context-foundation
+- kind: ServiceAccount
+  name: neo4j
+  namespace: context-foundation
