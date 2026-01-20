@@ -1,0 +1,35 @@
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mlcf-api-pdb
+  namespace: mlcf
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: mlcf-api
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: qdrant-pdb
+  namespace: mlcf
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: qdrant
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: neo4j-pdb
+  namespace: mlcf
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: neo4j
