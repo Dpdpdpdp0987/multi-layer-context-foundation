@@ -1,0 +1,205 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: neo4j
+  namespace: context-foundation
+  labels:
+    app: neo4j
+    component: graph-db
+    tier: data
+spec:
+  serviceName: neo4j-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+        component: graph-db
+        tier: data
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2004"
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: neo4j
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 7474
+        fsGroup: 7474
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: neo4j
+        image: neo4j:5.14-enterprise
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 7474
+          protocol: TCP
+        - name: https
+          containerPort: 7473
+          protocol: TCP
+        - name: bolt
+          containerPort: 7687
+          protocol: TCP
+        - name: backup
+          containerPort: 6362
+          protocol: TCP
+        - name: metrics
+          containerPort: 2004
+          protocol: TCP
+        - name: cluster
+          containerPort: 5000
+          protocol: TCP
+        - name: transaction
+          containerPort: 6000
+          protocol: TCP
+        - name: raft
+          containerPort: 7000
+          protocol: TCP
+        env:
+        - name: NEO4J_ACCEPT_LICENSE_AGREEMENT
+          value: "yes"
+        - name: NEO4J_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: context-secrets
+              key: NEO4J_AUTH
+        - name: NEO4J_dbms_mode
+          value: "CORE"
+        - name: NEO4J_causal__clustering_minimum__core__cluster__size__at__formation
+          value: "3"
+        - name: NEO4J_causal__clustering_minimum__core__cluster__size__at__runtime
+          value: "2"
+        - name: NEO4J_causal__clustering_initial__discovery__members
+          value: "neo4j-0.neo4j-headless.context-foundation.svc.cluster.local:5000,neo4j-1.neo4j-headless.context-foundation.svc.cluster.local:5000,neo4j-2.neo4j-headless.context-foundation.svc.cluster.local:5000"
+        - name: NEO4J_dbms_connector_bolt_advertised__address
+          value: "$(POD_NAME).neo4j-headless.context-foundation.svc.cluster.local:7687"
+        - name: NEO4J_dbms_connector_http_advertised__address
+          value: "$(POD_NAME).neo4j-headless.context-foundation.svc.cluster.local:7474"
+        - name: NEO4J_dbms_connector_https_advertised__address
+          value: "$(POD_NAME).neo4j-headless.context-foundation.svc.cluster.local:7473"
+        - name: NEO4J_causal__clustering_discovery__advertised__address
+          value: "$(POD_NAME).neo4j-headless.context-foundation.svc.cluster.local:5000"
+        - name: NEO4J_causal__clustering_transaction__advertised__address
+          value: "$(POD_NAME).neo4j-headless.context-foundation.svc.cluster.local:6000"
+        - name: NEO4J_causal__clustering_raft__advertised__address
+          value: "$(POD_NAME).neo4j-headless.context-foundation.svc.cluster.local:7000"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NEO4J_dbms_memory_pagecache_size
+          valueFrom:
+            configMapKeyRef:
+              name: neo4j-config
+              key: PAGE_CACHE_SIZE
+        - name: NEO4J_dbms_memory_heap_initial__size
+          valueFrom:
+            configMapKeyRef:
+              name: neo4j-config
+              key: HEAP_INITIAL_SIZE
+        - name: NEO4J_dbms_memory_heap_max__size
+          valueFrom:
+            configMapKeyRef:
+              name: neo4j-config
+              key: HEAP_MAX_SIZE
+        - name: NEO4J_metrics_prometheus_enabled
+          value: "true"
+        - name: NEO4J_metrics_prometheus_endpoint
+          value: "0.0.0.0:2004"
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2000m"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+        livenessProbe:
+          tcpSocket:
+            port: bolt
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: false
+        volumeMounts:
+        - name: neo4j-data
+          mountPath: /data
+        - name: neo4j-logs
+          mountPath: /logs
+        - name: neo4j-import
+          mountPath: /var/lib/neo4j/import
+        - name: neo4j-plugins
+          mountPath: /plugins
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - neo4j
+            topologyKey: kubernetes.io/hostname
+  volumeClaimTemplates:
+  - metadata:
+      name: neo4j-data
+      labels:
+        app: neo4j
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 200Gi
+  - metadata:
+      name: neo4j-logs
+      labels:
+        app: neo4j
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 20Gi
+  - metadata:
+      name: neo4j-import
+      labels:
+        app: neo4j
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 50Gi
+  - metadata:
+      name: neo4j-plugins
+      labels:
+        app: neo4j
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 5Gi
