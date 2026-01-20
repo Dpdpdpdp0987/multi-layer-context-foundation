@@ -1,0 +1,55 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: context-foundation
+
+resources:
+  # Base
+  - base/namespace.yaml
+  - base/configmaps.yaml
+  - base/secrets.yaml
+  
+  # Storage
+  - storage/storage-class.yaml
+  - storage/backup-pvc.yaml
+  
+  # Security
+  - security/rbac.yaml
+  - security/network-policy.yaml
+  - security/pod-security-policy.yaml
+  
+  # Services
+  - services/api-service.yaml
+  - services/qdrant-service.yaml
+  - services/neo4j-service.yaml
+  
+  # Workloads
+  - deployments/api-deployment.yaml
+  - statefulsets/qdrant-statefulset.yaml
+  - statefulsets/neo4j-statefulset.yaml
+  
+  # Istio
+  - istio/gateway.yaml
+  - istio/virtual-service.yaml
+  - istio/destination-rule.yaml
+  - istio/peer-authentication.yaml
+  - istio/authorization-policy.yaml
+  
+  # Autoscaling
+  - autoscaling/api-hpa.yaml
+  - autoscaling/api-vpa.yaml
+  - autoscaling/qdrant-vpa.yaml
+  - autoscaling/neo4j-vpa.yaml
+  
+  # Monitoring
+  - monitoring/service-monitor.yaml
+  - monitoring/prometheus-rules.yaml
+  - monitoring/grafana-dashboard.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: context-foundation
+  app.kubernetes.io/managed-by: kustomize
+
+images:
+  - name: ghcr.io/dpdpdpdp0987/context-api
+    newTag: latest
