@@ -1,0 +1,246 @@
+groups:
+- name: mlcf_api_alerts
+  interval: 30s
+  rules:
+  - alert: HighErrorRate
+    expr: |
+      sum(rate(http_requests_total{status=~"5.."}[5m]))
+      /
+      sum(rate(http_requests_total[5m]))
+      > 0.05
+    for: 5m
+    labels:
+      severity: critical
+      component: api
+    annotations:
+      summary: "High API error rate"
+      description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+      dashboard: "https://grafana.example.com/d/mlcf-overview"
+  
+  - alert: HighLatency
+    expr: |
+      histogram_quantile(0.95,
+        sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint)
+      ) > 2
+    for: 10m
+    labels:
+      severity: warning
+      component: api
+    annotations:
+      summary: "High API latency on {{ $labels.endpoint }}"
+      description: "95th percentile latency is {{ $value }}s (threshold: 2s)"
+  
+  - alert: TooManyRequests
+    expr: sum(http_requests_in_progress) > 100
+    for: 5m
+    labels:
+      severity: warning
+      component: api
+    annotations:
+      summary: "Too many concurrent requests"
+      description: "{{ $value }} requests in progress (threshold: 100)"
+  
+  - alert: APIDown
+    expr: up{job="mlcf-api"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      component: api
+    annotations:
+      summary: "API is down"
+      description: "API instance {{ $labels.instance }} is unreachable"
+
+- name: mlcf_context_alerts
+  interval: 30s
+  rules:
+  - alert: ContextOperationFailures
+    expr: |
+      sum(rate(context_operations_total{status="error"}[5m]))
+      /
+      sum(rate(context_operations_total[5m]))
+      > 0.1
+    for: 5m
+    labels:
+      severity: warning
+      component: context
+    annotations:
+      summary: "High context operation failure rate"
+      description: "Failure rate is {{ $value | humanizePercentage }} (threshold: 10%)"
+  
+  - alert: LowCacheHitRate
+    expr: |
+      sum(rate(context_cache_hits_total[5m]))
+      /
+      (sum(rate(context_cache_hits_total[5m])) + sum(rate(context_cache_misses_total[5m])))
+      < 0.5
+    for: 15m
+    labels:
+      severity: info
+      component: context
+    annotations:
+      summary: "Low cache hit rate"
+      description: "Cache hit rate is {{ $value | humanizePercentage }} (threshold: 50%)"
+  
+  - alert: ContextBufferFull
+    expr: context_items_total{layer="immediate"} >= 10
+    for: 5m
+    labels:
+      severity: info
+      component: context
+    annotations:
+      summary: "Immediate context buffer is full"
+      description: "Buffer has {{ $value }} items (capacity: 10)"
+
+- name: mlcf_search_alerts
+  interval: 30s
+  rules:
+  - alert: SlowSearchQueries
+    expr: |
+      histogram_quantile(0.95,
+        sum(rate(search_duration_seconds_bucket[5m])) by (le, strategy)
+      ) > 5
+    for: 10m
+    labels:
+      severity: warning
+      component: search
+    annotations:
+      summary: "Slow search queries for {{ $labels.strategy }}"
+      description: "95th percentile duration is {{ $value }}s (threshold: 5s)"
+  
+  - alert: SearchFailures
+    expr: |
+      sum(rate(search_queries_total{status="error"}[5m]))
+      /
+      sum(rate(search_queries_total[5m]))
+      > 0.05
+    for: 5m
+    labels:
+      severity: warning
+      component: search
+    annotations:
+      summary: "High search failure rate"
+      description: "Failure rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+- name: mlcf_database_alerts
+  interval: 30s
+  rules:
+  - alert: VectorDBDown
+    expr: up{job="qdrant"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: vector-db
+    annotations:
+      summary: "Vector database is down"
+      description: "Qdrant instance {{ $labels.instance }} is unreachable"
+  
+  - alert: GraphDBDown
+    expr: up{job="neo4j"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: graph-db
+    annotations:
+      summary: "Graph database is down"
+      description: "Neo4j instance {{ $labels.instance }} is unreachable"
+  
+  - alert: SlowVectorOperations
+    expr: |
+      histogram_quantile(0.95,
+        sum(rate(vector_db_operation_duration_seconds_bucket[5m])) by (le, operation)
+      ) > 3
+    for: 10m
+    labels:
+      severity: warning
+      component: vector-db
+    annotations:
+      summary: "Slow vector database operations"
+      description: "{{ $labels.operation }} p95 duration is {{ $value }}s (threshold: 3s)"
+  
+  - alert: SlowGraphOperations
+    expr: |
+      histogram_quantile(0.95,
+        sum(rate(graph_db_operation_duration_seconds_bucket[5m])) by (le, operation)
+      ) > 3
+    for: 10m
+    labels:
+      severity: warning
+      component: graph-db
+    annotations:
+      summary: "Slow graph database operations"
+      description: "{{ $labels.operation }} p95 duration is {{ $value }}s (threshold: 3s)"
+
+- name: mlcf_resource_alerts
+  interval: 30s
+  rules:
+  - alert: HighMemoryUsage
+    expr: |
+      memory_usage_bytes{type="rss"}
+      /
+      (memory_usage_bytes{type="system_available"} + memory_usage_bytes{type="system_used"})
+      > 0.9
+    for: 5m
+    labels:
+      severity: warning
+      component: system
+    annotations:
+      summary: "High memory usage"
+      description: "Memory usage is {{ $value | humanizePercentage }} (threshold: 90%)"
+  
+  - alert: MemoryLeak
+    expr: |
+      rate(memory_usage_bytes{type="rss"}[1h]) > 10485760
+    for: 1h
+    labels:
+      severity: warning
+      component: system
+    annotations:
+      summary: "Possible memory leak detected"
+      description: "Memory growing at {{ $value | humanize }}B/s for 1 hour"
+  
+  - alert: TooManyErrors
+    expr: sum(rate(errors_total[5m])) > 10
+    for: 5m
+    labels:
+      severity: warning
+      component: system
+    annotations:
+      summary: "High error rate"
+      description: "{{ $value }} errors per second (threshold: 10)"
+
+- name: mlcf_auth_alerts
+  interval: 30s
+  rules:
+  - alert: HighAuthFailureRate
+    expr: |
+      sum(rate(auth_attempts_total{status="failure"}[5m]))
+      /
+      sum(rate(auth_attempts_total[5m]))
+      > 0.3
+    for: 5m
+    labels:
+      severity: warning
+      component: auth
+    annotations:
+      summary: "High authentication failure rate"
+      description: "Failure rate is {{ $value | humanizePercentage }} (threshold: 30%)"
+  
+  - alert: SuspiciousAuthActivity
+    expr: sum(rate(auth_attempts_total{status="failure"}[1m])) > 20
+    for: 2m
+    labels:
+      severity: critical
+      component: auth
+    annotations:
+      summary: "Possible brute force attack"
+      description: "{{ $value }} failed auth attempts per second"
+  
+  - alert: TokenBlacklistGrowing
+    expr: rate(token_operations_total{operation="revoke"}[1h]) > 100
+    for: 30m
+    labels:
+      severity: info
+      component: auth
+    annotations:
+      summary: "High token revocation rate"
+      description: "{{ $value }} tokens revoked per second"
