@@ -1,0 +1,129 @@
+# Multi-Layer Context Foundation Configuration
+
+# Application Settings
+app:
+  name: "Multi-Layer Context Foundation"
+  version: "0.1.0"
+  debug: true
+  log_level: "INFO"
+
+# Memory Configuration
+memory:
+  short_term:
+    max_size: 10
+    retention_policy: "fifo"  # fifo, lru, ttl
+    ttl_seconds: 3600  # 1 hour
+  
+  working:
+    max_size: 50
+    relevance_threshold: 0.7
+    eviction_policy: "lru"  # lru, relevance, hybrid
+  
+  long_term:
+    # Vector Database
+    vector_db:
+      provider: "qdrant"  # qdrant, chroma, milvus
+      host: "localhost"
+      port: 6333
+      collection: "mlcf_vectors"
+      distance_metric: "cosine"  # cosine, euclidean, dot
+    
+    # Graph Database
+    graph_db:
+      provider: "neo4j"  # neo4j, libsql
+      uri: "bolt://localhost:7687"
+      user: "neo4j"
+      password: "password"
+      database: "neo4j"
+
+# Retrieval Configuration
+retrieval:
+  strategy: "hybrid"  # hybrid, semantic, keyword, graph
+  
+  # Strategy weights (must sum to 1.0)
+  weights:
+    semantic: 0.5
+    keyword: 0.3
+    graph: 0.2
+  
+  # Re-ranking
+  reranking:
+    enabled: true
+    model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    top_k: 100  # Rerank top K results
+  
+  # Retrieval limits
+  max_results: 10
+  min_score: 0.5
+
+# Embedding Configuration
+embeddings:
+  model: "sentence-transformers/all-MiniLM-L6-v2"
+  dimension: 384
+  batch_size: 32
+  normalize: true
+  device: "cpu"  # cpu, cuda, mps
+
+# Context Window Management
+context:
+  max_tokens: 4096
+  optimization:
+    enabled: true
+    strategy: "adaptive"  # fixed, adaptive, dynamic
+  
+  pruning:
+    enabled: true
+    threshold: 0.6
+    method: "relevance"  # relevance, recency, hybrid
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  timeout: 30
+  cors:
+    enabled: true
+    origins:
+      - "http://localhost:3000"
+      - "http://localhost:8000"
+
+# MCP Server Configuration
+mcp:
+  host: "0.0.0.0"
+  port: 3000
+  max_connections: 100
+
+# Caching (Optional)
+cache:
+  enabled: false
+  backend: "redis"  # redis, memory
+  ttl: 3600
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+
+# Monitoring
+monitoring:
+  enabled: true
+  metrics:
+    prometheus:
+      enabled: false
+      port: 9090
+  
+  logging:
+    format: "json"  # json, text
+    file: "logs/mlcf.log"
+    rotation: "10 MB"
+    retention: "7 days"
+
+# Security
+security:
+  api_key:
+    enabled: false
+    header: "X-API-Key"
+  
+  rate_limiting:
+    enabled: false
+    requests_per_minute: 60
