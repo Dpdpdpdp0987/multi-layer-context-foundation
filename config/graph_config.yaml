@@ -1,0 +1,160 @@
+# Neo4j Graph Database Configuration
+
+graph_store:
+  # Provider
+  provider: "neo4j"
+  
+  # Neo4j Connection
+  neo4j:
+    uri: "bolt://localhost:7687"
+    user: "neo4j"
+    password: "password"
+    database: "neo4j"  # Default database
+    
+    # Connection pool settings
+    max_connection_lifetime: 3600  # seconds
+    max_connection_pool_size: 50
+    connection_acquisition_timeout: 60  # seconds
+    
+    # Encryption
+    encrypted: false
+    trust: "TRUST_ALL_CERTIFICATES"  # For development only
+
+# Entity Extraction Configuration
+entity_extraction:
+  # Spacy model
+  model: "en_core_web_sm"  # or en_core_web_md, en_core_web_lg
+  
+  # Entity types to extract (null = all)
+  entity_types: null
+  # Uncomment to filter:
+  # entity_types:
+  #   - PERSON
+  #   - ORG
+  #   - GPE
+  #   - PRODUCT
+  
+  # Confidence threshold
+  min_confidence: 0.5
+  
+  # Context window for entity extraction
+  context_window: 50
+  
+  # Custom entity patterns
+  custom_patterns:
+    enable_email: true
+    enable_url: true
+    enable_phone: true
+
+# Relationship Extraction Configuration
+relationship_mapping:
+  # Extraction methods
+  methods:
+    dependency_based: true
+    pattern_based: true
+    cooccurrence_based: true
+  
+  # Confidence threshold
+  min_confidence: 0.5
+  
+  # Custom relationship patterns
+  custom_patterns:
+    verbs:
+      acquire: "ACQUIRED"
+      merge: "MERGED_WITH"
+      partner: "PARTNERS_WITH"
+    prepositions:
+      during: "DURING"
+      before: "BEFORE"
+      after: "AFTER"
+
+# Knowledge Graph Building
+knowledge_graph:
+  # Auto-commit to Neo4j
+  auto_commit: true
+  
+  # Entity ID generation
+  id_strategy: "hash"  # hash, uuid, or custom
+  
+  # Duplicate detection
+  merge_duplicates: true
+  similarity_threshold: 0.9
+  
+  # Relationship consolidation
+  consolidate_relationships: true
+  keep_highest_confidence: true
+
+# Graph Search Configuration
+graph_search:
+  # Traversal settings
+  max_depth: 3
+  max_results: 10
+  
+  # Relationship filtering
+  relationship_types: null  # null = all types
+  
+  # Scoring
+  score_by_centrality: true
+  score_by_path_length: true
+  
+  # Cache settings
+  enable_cache: true
+  cache_ttl: 300  # seconds
+
+# Schema Configuration
+schema:
+  # Node labels
+  base_label: "Entity"
+  
+  node_types:
+    - Person
+    - Organization
+    - Location
+    - Product
+    - Event
+    - Concept
+    - Document
+  
+  # Indexes to create
+  indexes:
+    - label: Entity
+      properties:
+        - id
+        - name
+        - type
+    
+    - label: Person
+      properties:
+        - id
+    
+    - label: Organization
+      properties:
+        - id
+  
+  # Constraints
+  constraints:
+    - label: Entity
+      property: id
+      type: unique
+
+# Performance Settings
+performance:
+  # Batch processing
+  batch_size: 100
+  
+  # Parallel processing
+  parallel_extraction: false
+  max_workers: 4
+  
+  # Memory management
+  clear_cache_interval: 1000  # items
+  
+  # Query timeout
+  query_timeout: 30  # seconds
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_queries: false
+  log_entity_extraction: true
+  log_relationship_mapping: true
