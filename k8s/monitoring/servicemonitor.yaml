@@ -1,0 +1,54 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mlcf-api
+  namespace: mlcf
+  labels:
+    app: mlcf-api
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: mlcf-api
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: qdrant
+  namespace: mlcf
+  labels:
+    app: qdrant
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: qdrant
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: neo4j
+  namespace: mlcf
+  labels:
+    app: neo4j
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: neo4j
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s

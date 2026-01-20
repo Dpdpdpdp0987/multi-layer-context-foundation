@@ -1,0 +1,123 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mlcf-alerts
+  namespace: mlcf
+  labels:
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: mlcf-api
+    interval: 30s
+    rules:
+    - alert: MLCFAPIHighErrorRate
+      expr: |
+        sum(rate(http_requests_total{job="mlcf-api",status=~"5.."}[5m]))
+        /
+        sum(rate(http_requests_total{job="mlcf-api"}[5m]))
+        > 0.05
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "High error rate on MLCF API"
+        description: "Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+    
+    - alert: MLCFAPIHighLatency
+      expr: |
+        histogram_quantile(0.95, 
+          sum(rate(http_request_duration_seconds_bucket{job="mlcf-api"}[5m])) by (le)
+        ) > 1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High latency on MLCF API"
+        description: "95th percentile latency is {{ $value }}s"
+    
+    - alert: MLCFAPIPodDown
+      expr: kube_deployment_status_replicas_available{deployment="mlcf-api"} < 2
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "MLCF API has less than 2 replicas available"
+        description: "Only {{ $value }} replicas available"
+    
+    - alert: MLCFAPIHighMemoryUsage
+      expr: |
+        container_memory_usage_bytes{pod=~"mlcf-api.*",container="api"}
+        /
+        container_spec_memory_limit_bytes{pod=~"mlcf-api.*",container="api"}
+        > 0.9
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "MLCF API high memory usage"
+        description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"
+    
+    - alert: MLCFAPIHighCPUUsage
+      expr: |
+        rate(container_cpu_usage_seconds_total{pod=~"mlcf-api.*",container="api"}[5m])
+        /
+        container_spec_cpu_quota{pod=~"mlcf-api.*",container="api"}
+        * 100000
+        > 0.9
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "MLCF API high CPU usage"
+        description: "CPU usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"
+  
+  - name: qdrant
+    interval: 30s
+    rules:
+    - alert: QdrantNodeDown
+      expr: up{job="qdrant"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Qdrant node is down"
+        description: "Qdrant instance {{ $labels.instance }} is down"
+    
+    - alert: QdrantHighMemoryUsage
+      expr: |
+        container_memory_usage_bytes{pod=~"qdrant.*"}
+        /
+        container_spec_memory_limit_bytes{pod=~"qdrant.*"}
+        > 0.9
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Qdrant high memory usage"
+        description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"
+  
+  - name: neo4j
+    interval: 30s
+    rules:
+    - alert: Neo4jNodeDown
+      expr: up{job="neo4j"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Neo4j node is down"
+        description: "Neo4j instance {{ $labels.instance }} is down"
+    
+    - alert: Neo4jHighMemoryUsage
+      expr: |
+        container_memory_usage_bytes{pod=~"neo4j.*"}
+        /
+        container_spec_memory_limit_bytes{pod=~"neo4j.*"}
+        > 0.9
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Neo4j high memory usage"
+        description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"

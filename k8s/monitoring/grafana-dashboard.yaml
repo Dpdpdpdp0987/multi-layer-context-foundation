@@ -1,0 +1,89 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlcf-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  mlcf-dashboard.json: |
+    {
+      "dashboard": {
+        "title": "MLCF System Overview",
+        "tags": ["mlcf", "context-management"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "title": "Request Rate",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{job='mlcf-api'}[5m]))",
+                "legendFormat": "Requests/sec"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Error Rate",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{job='mlcf-api',status=~'5..'}[5m])) / sum(rate(http_requests_total{job='mlcf-api'}[5m]))",
+                "legendFormat": "Error Rate"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Response Time (p95)",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job='mlcf-api'}[5m])) by (le))",
+                "legendFormat": "p95 latency"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Active Pods",
+            "targets": [
+              {
+                "expr": "kube_deployment_status_replicas_available{deployment='mlcf-api'}",
+                "legendFormat": "API Pods"
+              },
+              {
+                "expr": "kube_statefulset_status_replicas_ready{statefulset='qdrant'}",
+                "legendFormat": "Qdrant Pods"
+              },
+              {
+                "expr": "kube_statefulset_status_replicas_ready{statefulset='neo4j'}",
+                "legendFormat": "Neo4j Pods"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Memory Usage",
+            "targets": [
+              {
+                "expr": "sum(container_memory_usage_bytes{pod=~'mlcf-api.*'}) by (pod)",
+                "legendFormat": "{{pod}}"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "CPU Usage",
+            "targets": [
+              {
+                "expr": "sum(rate(container_cpu_usage_seconds_total{pod=~'mlcf-api.*'}[5m])) by (pod)",
+                "legendFormat": "{{pod}}"
+              }
+            ],
+            "type": "graph"
+          }
+        ],
+        "schemaVersion": 16,
+        "version": 0
+      }
+    }
