@@ -1,246 +1,431 @@
-# Multi-Layer Context Foundation System
+# Multi-Layer Context Foundation
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
-![Status](https://img.shields.io/badge/status-alpha-orange.svg)
+A sophisticated Python system for managing conversational context across multiple storage layers with intelligent retrieval strategies.
 
-An advanced multi-layer context management system with hybrid retrieval capabilities for AI assistants. This system combines semantic memory, vector search, knowledge graphs, and adaptive context routing to provide intelligent, context-aware responses.
+## 🌟 Features
 
-## 🎯 Overview
+### Multi-Layer Architecture
+- **Immediate Context Buffer**: High-speed FIFO buffer for hot, frequently accessed context
+  - Configurable TTL for automatic expiration
+  - Token budget management
+  - Fast lookup with O(1) access
 
-The Multi-Layer Context Foundation addresses the challenge of maintaining coherent, relevant context across extended AI conversations by implementing:
+- **Session Memory**: LRU-based mid-term storage for conversation history
+  - Automatic consolidation of older items
+  - Relevance tracking and decay
+  - Conversation and task grouping
+  - Smart eviction based on access patterns
 
-- **Multi-Layer Memory Architecture**: Short-term, working, and long-term memory layers
-- **Hybrid Retrieval System**: Combines vector search, keyword matching, and graph-based retrieval
-- **Adaptive Context Management**: Dynamic context window optimization
-- **Semantic Knowledge Storage**: Vector embeddings with relationship mapping
-- **MCP Server Integration**: Compatible with Model Context Protocol
+- **Long-Term Store**: Persistent storage for important context
+  - Cross-session persistence
+  - Importance-based retention
+  - Scalable storage backend (extensible)
 
-## 🏗️ Architecture
+### Advanced Retrieval
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Application Layer                        │
-│                  (MCP Server / API Gateway)                  │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-┌──────────────────────────┴──────────────────────────────────┐
-│                  Context Manager (Core)                      │
-│  ┌────────────┐  ┌────────────┐  ┌─────────────────────┐   │
-│  │   Short    │  │  Working   │  │    Long-Term        │   │
-│  │   Term     │─▶│  Memory    │─▶│    Memory           │   │
-│  │  Memory    │  │            │  │  (Vector + Graph)   │   │
-│  └────────────┘  └────────────┘  └─────────────────────┘   │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-┌──────────────────────────┴──────────────────────────────────┐
-│              Hybrid Retrieval Engine                         │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐   │
-│  │   Vector    │  │   Keyword    │  │     Graph        │   │
-│  │   Search    │  │    Search    │  │   Traversal      │   │
-│  │  (Semantic) │  │    (BM25)    │  │  (Relations)     │   │
-│  └─────────────┘  └──────────────┘  └──────────────────┘   │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-┌──────────────────────────┴──────────────────────────────────┐
-│                   Storage Layer                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   Vector DB  │  │   Graph DB   │  │   Document DB    │  │
-│  │  (Qdrant/    │  │   (Neo4j/    │  │   (SQLite/       │  │
-│  │   Milvus)    │  │   LibSQL)    │  │   PostgreSQL)    │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
+- **Hybrid Retrieval Engine**: Combines multiple search strategies
+  - Semantic similarity search (vector-based)
+  - BM25 keyword search with proper IDF calculation
+  - Graph-based context traversal
+  - Intelligent result fusion and normalization
 
-## 🚀 Features
+- **BM25 Keyword Search**
+  - Industry-standard ranking algorithm
+  - Document length normalization
+  - Configurable k1 and b parameters
+  - Efficient inverted index
 
-### Core Capabilities
+- **Adaptive Chunking System**
+  - Preserves sentence and paragraph boundaries
+  - Intelligent overlap calculation
+  - Configurable chunk sizes
+  - Metadata preservation
 
-- **Intelligent Memory Hierarchy**
-  - Short-term: Recent conversation context (last 5-10 exchanges)
-  - Working memory: Active task context with relevance scoring
-  - Long-term: Persistent knowledge with semantic indexing
+### Performance & Monitoring
 
-- **Hybrid Retrieval**
-  - Semantic search using vector embeddings
-  - Keyword-based BM25 ranking
-  - Graph-based relationship traversal
-  - Intelligent result fusion and re-ranking
+- Query result caching with TTL
+- Comprehensive metrics tracking
+- Layer-specific statistics
+- Cache hit/miss monitoring
+- Automatic performance optimization
 
-- **Context Optimization**
-  - Dynamic context window management
-  - Relevance-based pruning
-  - Token budget optimization
-  - Mode-aware context adaptation
+## 📦 Installation
 
-- **Knowledge Management**
-  - Automatic entity extraction
-  - Relationship mapping
-  - Conflict resolution
-  - Version tracking
+### Prerequisites
+- Python 3.8+
+- PostgreSQL with pgvector extension (for production deployment)
 
-## 📋 Prerequisites
-
-- Python 3.10 or higher
-- Docker (optional, for containerized deployment)
-- 4GB+ RAM recommended
-- Storage: 1GB+ for vector databases
-
-## 🔧 Installation
-
-### Quick Start
+### Setup
 
 ```bash
 # Clone the repository
 git clone https://github.com/Dpdpdpdp0987/multi-layer-context-foundation.git
 cd multi-layer-context-foundation
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
 # Install dependencies
 pip install -r requirements.txt
 
-# Run setup script
-python scripts/setup.py
-
-# Initialize databases
-python scripts/init_databases.py
+# For development
+pip install -r requirements-dev.txt
 ```
 
-### Docker Installation
+### Dependencies
 
-```bash
-# Build the image
-docker-compose build
+```txt
+# requirements.txt
+numpy>=1.20.0
+asyncio-extras>=1.3.2
 
-# Start services
-docker-compose up -d
-
-# Check status
-docker-compose ps
+# requirements-dev.txt (for testing)
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
 ```
 
-## 📖 Usage
+## 🚀 Quick Start
 
 ### Basic Usage
 
 ```python
-from mlcf import ContextManager, HybridRetriever
+import asyncio
+from context_foundation.orchestrator import ContextOrchestrator
 
-# Initialize the context manager
-context_mgr = ContextManager(
-    vector_db="qdrant",
-    graph_db="neo4j",
-    embedding_model="sentence-transformers/all-MiniLM-L6-v2"
-)
+async def main():
+    # Initialize the orchestrator
+    orchestrator = ContextOrchestrator()
+    
+    # Add context
+    context_id = await orchestrator.add_context(
+        content="User prefers Python for backend development.",
+        metadata={
+            "type": "preference",
+            "importance": 0.8
+        }
+    )
+    
+    # Retrieve relevant context
+    results = await orchestrator.get_context(
+        query="What programming language does the user like?",
+        max_results=5
+    )
+    
+    for result in results:
+        print(f"Score: {result['score']:.3f}")
+        print(f"Content: {result['content']}")
+        print(f"Layer: {result['layer']}\n")
 
-# Store information
-context_mgr.store(
-    content="User prefers Python for backend development",
-    metadata={"type": "preference", "category": "programming"}
-)
-
-# Retrieve relevant context
-context = context_mgr.retrieve(
-    query="What programming language should I use?",
-    max_results=5,
-    strategy="hybrid"  # or "semantic", "keyword", "graph"
-)
-
-print(context)
+asyncio.run(main())
 ```
 
-### MCP Server Mode
+### Session Management
 
-```bash
-# Start MCP server
-python -m mlcf.server --port 3000
-
-# Or use the CLI
-mlcf serve --config config/mcp_config.yaml
+```python
+async def session_example():
+    orchestrator = ContextOrchestrator()
+    session_id = "user_123"
+    
+    # Add conversation turns
+    await orchestrator.add_context(
+        content="I'm working on a database migration.",
+        metadata={"session_id": session_id, "turn": 0}
+    )
+    
+    await orchestrator.add_context(
+        content="Moving from MySQL to PostgreSQL.",
+        metadata={"session_id": session_id, "turn": 1}
+    )
+    
+    # Retrieve session-specific context
+    results = await orchestrator.get_context(
+        query="database migration details",
+        filters={"session_id": session_id}
+    )
 ```
 
-### Configuration
+### Working with Specific Layers
 
-Create a `config.yaml` file:
+```python
+from context_foundation.layers.immediate import ImmediateContextBuffer
+from context_foundation.layers.session import SessionMemory
 
-```yaml
-memory:
-  short_term:
-    max_size: 10
-    retention_policy: "fifo"
-  
-  working:
-    max_size: 50
-    relevance_threshold: 0.7
-  
-  long_term:
-    vector_db:
-      provider: "qdrant"
-      host: "localhost"
-      port: 6333
-    graph_db:
-      provider: "neo4j"
-      uri: "bolt://localhost:7687"
-
-retrieval:
-  strategy: "hybrid"
-  weights:
-    semantic: 0.5
-    keyword: 0.3
-    graph: 0.2
-  
-  reranking:
-    enabled: true
-    model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
-
-embeddings:
-  model: "sentence-transformers/all-MiniLM-L6-v2"
-  dimension: 384
-  batch_size: 32
+async def layer_example():
+    # Immediate buffer for hot context
+    immediate = ImmediateContextBuffer(
+        max_size=10,
+        ttl_seconds=300  # 5 minutes
+    )
+    
+    await immediate.add_item(
+        content="Current task: implementing authentication",
+        metadata={"priority": "high"}
+    )
+    
+    # Session memory for conversation history
+    session = SessionMemory(
+        max_size=50,
+        consolidation_threshold=20
+    )
+    
+    await session.add_item(
+        content="User asked about OAuth2 implementation",
+        metadata={"session_id": "auth_conv"}
+    )
 ```
+
+### BM25 Keyword Search
+
+```python
+from context_foundation.search.bm25 import BM25Search
+
+async def bm25_example():
+    bm25 = BM25Search(k1=1.5, b=0.75)
+    
+    # Index documents
+    await bm25.index_document(
+        doc_id="doc1",
+        content="Python is great for web development",
+        metadata={"category": "programming"}
+    )
+    
+    # Search
+    results = await bm25.search("Python web", top_k=5)
+    for result in results:
+        print(f"{result['content']} (score: {result['score']:.3f})")
+```
+
+### Adaptive Chunking
+
+```python
+from context_foundation.search.chunking import AdaptiveChunker
+
+async def chunking_example():
+    chunker = AdaptiveChunker(
+        target_chunk_size=200,
+        min_chunk_size=100,
+        max_chunk_size=300
+    )
+    
+    long_text = "Your long document here..."
+    
+    chunks = await chunker.chunk_text(
+        text=long_text,
+        metadata={"source": "documentation"}
+    )
+    
+    for chunk in chunks:
+        print(f"Chunk: {chunk['content'][:50]}...")
+        print(f"Size: {chunk['chunk_size']}, Overlap: {chunk['overlap_size']}")
+```
+
+## 🏗️ Architecture
+
+### Layer Hierarchy
+
+```
+┌─────────────────────────────────────┐
+│     Context Orchestrator            │
+│  (Coordinates all layers)           │
+└─────────────┬───────────────────────┘
+              │
+    ┌─────────┴─────────┬──────────────┐
+    │                   │              │
+┌───▼────────┐  ┌──────▼──────┐  ┌───▼──────────┐
+│ Immediate  │  │  Session    │  │  Long-term   │
+│  Buffer    │  │  Memory     │  │    Store     │
+│ (FIFO/TTL) │  │   (LRU)     │  │ (Persistent) │
+└────────────┘  └─────────────┘  └──────────────┘
+```
+
+### Data Flow
+
+1. **Write Path**
+   - Context arrives at orchestrator
+   - Orchestrator determines appropriate layer(s)
+   - Item stored with metadata and embeddings
+   - Indices updated (BM25, vector, graph)
+
+2. **Read Path**
+   - Query arrives at orchestrator
+   - Check cache for recent identical queries
+   - Query all relevant layers in parallel
+   - Apply hybrid retrieval (semantic + keyword + graph)
+   - Fuse and normalize results
+   - Return ranked results
+
+### Retrieval Strategies
+
+The system supports multiple retrieval strategies that can be combined:
+
+1. **Semantic Search**: Vector similarity using embeddings
+2. **Keyword Search**: BM25 ranking for exact term matching
+3. **Graph Traversal**: Following context relationships
+4. **Hybrid Fusion**: Weighted combination of all strategies
+
+## 📊 Configuration
+
+### Orchestrator Configuration
+
+```python
+orchestrator = ContextOrchestrator(
+    cache_ttl=300,              # Cache results for 5 minutes
+    default_max_results=10       # Default number of results
+)
+```
+
+### Layer Configuration
+
+```python
+# Immediate Buffer
+immediate = ImmediateContextBuffer(
+    max_size=20,                 # Maximum number of items
+    ttl_seconds=600,             # 10 minutes TTL
+    max_tokens=4000              # Token budget limit
+)
+
+# Session Memory
+session = SessionMemory(
+    max_size=100,                # Maximum items before eviction
+    consolidation_threshold=50,  # Consolidate when this many items
+    relevance_decay=0.1          # Relevance decay per consolidation
+)
+
+# Long-term Store
+longterm = LongTermStore(
+    persistence_threshold=0.7,   # Minimum importance to persist
+    max_items=10000              # Maximum stored items
+)
+```
+
+### Search Configuration
+
+```python
+# BM25 Parameters
+bm25 = BM25Search(
+    k1=1.5,    # Term frequency saturation
+    b=0.75     # Length normalization
+)
+
+# Chunking Parameters
+chunker = AdaptiveChunker(
+    target_chunk_size=500,     # Target characters per chunk
+    min_chunk_size=200,        # Minimum chunk size
+    max_chunk_size=1000,       # Maximum chunk size
+    overlap_ratio=0.1          # 10% overlap between chunks
+)
+
+# Hybrid Retrieval Weights
+hybrid = HybridRetrieval(
+    semantic_weight=0.5,       # Weight for vector search
+    keyword_weight=0.3,        # Weight for BM25 search
+    graph_weight=0.2           # Weight for graph traversal
+)
+```
+
+## 📈 Monitoring & Metrics
+
+### Getting System Metrics
+
+```python
+metrics = orchestrator.get_metrics()
+
+print(f"Total items: {metrics['total_items']}")
+print(f"Cache hit rate: {metrics['cache_hits'] / (metrics['cache_hits'] + metrics['cache_misses']):.1%}")
+print(f"Avg results per query: {metrics['avg_results_per_query']:.2f}")
+
+# Layer-specific metrics
+print(f"Immediate buffer size: {metrics['immediate_buffer']['size']}")
+print(f"Session memory size: {metrics['session_memory']['size']}")
+print(f"Consolidations: {metrics['session_memory']['consolidation_count']}")
+```
+
+### Performance Monitoring
+
+The system tracks:
+- Query latency
+- Cache hit/miss ratio
+- Layer distribution of results
+- Consolidation frequency
+- Memory usage per layer
+- Retrieval strategy effectiveness
 
 ## 🧪 Testing
 
+### Run All Tests
+
 ```bash
-# Run all tests
-pytest tests/
+# Run test suite
+pytest
 
-# Run specific test suite
-pytest tests/test_context_manager.py -v
+# With coverage
+pytest --cov=context_foundation --cov-report=html
 
-# Run with coverage
-pytest --cov=mlcf tests/
+# Run specific test file
+pytest tests/test_orchestrator.py
 
-# Run integration tests
-pytest tests/integration/ --slow
+# Run with verbose output
+pytest -v
 ```
 
-## 📊 Performance
+### Test Coverage
 
-- **Query Latency**: <100ms for semantic search (avg)
-- **Throughput**: 100+ queries/second
-- **Memory Footprint**: ~500MB baseline
-- **Scalability**: Tested with 1M+ documents
+The project includes comprehensive tests for:
+- ✅ Context Orchestrator coordination
+- ✅ Immediate Buffer FIFO and TTL
+- ✅ Session Memory LRU and consolidation
+- ✅ BM25 keyword search
+- ✅ Adaptive chunking
+- ✅ Hybrid retrieval fusion
+- ✅ Caching mechanisms
+- ✅ Metrics tracking
 
-## 🗺️ Roadmap
+## 📝 Examples
 
-- [x] Core memory architecture
-- [x] Basic vector search
-- [ ] Graph database integration
-- [ ] Hybrid retrieval with re-ranking
-- [ ] MCP server implementation
-- [ ] Adaptive context optimization
-- [ ] Multi-modal support (images, audio)
-- [ ] Distributed deployment support
-- [ ] Real-time streaming updates
-- [ ] Advanced conflict resolution
+See the `examples/` directory for complete working examples:
 
-## 🤝 Contributing
+- `basic_usage.py`: Core functionality demonstration
+- More examples coming soon...
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Run examples:
+
+```bash
+python examples/basic_usage.py
+```
+
+## 🛠️ Development
+
+### Project Structure
+
+```
+multi-layer-context-foundation/
+├── context_foundation/
+│   ├── __init__.py
+│   ├── orchestrator.py          # Main orchestrator
+│   ├── layers/
+│   │   ├── __init__.py
+│   │   ├── immediate.py         # Immediate buffer
+│   │   ├── session.py           # Session memory
+│   │   └── longterm.py          # Long-term store
+│   └── search/
+│       ├── __init__.py
+│       ├── bm25.py              # BM25 keyword search
+│       ├── chunking.py          # Adaptive chunking
+│       └── hybrid.py            # Hybrid retrieval
+├── tests/
+│   ├── test_orchestrator.py
+│   ├── test_immediate.py
+│   ├── test_session.py
+│   ├── test_bm25.py
+│   ├── test_chunking.py
+│   └── test_hybrid.py
+├── examples/
+│   └── basic_usage.py
+├── README.md
+└── requirements.txt
+```
+
+### Contributing
+
+Contributions are welcome! Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -248,27 +433,48 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📝 License
+### Code Style
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+- Follow PEP 8 guidelines
+- Use type hints for function signatures
+- Write docstrings for all public methods
+- Maintain test coverage above 80%
+
+## 🔮 Roadmap
+
+### Planned Features
+
+- [ ] PostgreSQL + pgvector integration for production deployment
+- [ ] GraphQL API for external access
+- [ ] Real-time context streaming
+- [ ] Advanced consolidation strategies
+- [ ] Context versioning and rollback
+- [ ] Multi-modal context support (images, audio)
+- [ ] Distributed deployment support
+- [ ] Context sharing across sessions
+- [ ] Advanced privacy controls
+- [ ] Plugin system for custom layers
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
-- Inspired by [BondAI](https://github.com/krohling/bondai) and [Context-Keeper](https://github.com/redleaves/context-keeper)
-- Built on top of LangChain, Qdrant, and Neo4j
-- Special thanks to the MCP community
+Built with ❤️ by Daniela Mümken
 
-## 📧 Contact
+Key technologies:
+- Python asyncio for high-performance async operations
+- BM25 algorithm for keyword search
+- Vector embeddings for semantic search
+- LRU/FIFO caching strategies
 
-- GitHub: [@Dpdpdpdp0987](https://github.com/Dpdpdpdp0987)
-- Issues: [GitHub Issues](https://github.com/Dpdpdpdp0987/multi-layer-context-foundation/issues)
+## 📞 Support
 
-## 📚 Documentation
-
-For detailed documentation, visit our [Wiki](https://github.com/Dpdpdpdp0987/multi-layer-context-foundation/wiki) or check the [docs/](docs/) directory.
+For questions, issues, or suggestions:
+- Open an issue on GitHub
+- Contact: [Your contact information]
 
 ---
 
-**Status**: Alpha - Under active development
-
-**Last Updated**: January 2026
+**Note**: This is an active development project. APIs may change as new features are added and the system evolves.
