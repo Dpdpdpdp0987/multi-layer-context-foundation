@@ -1,0 +1,260 @@
+{
+  "dashboard": {
+    "title": "MLCF System Overview",
+    "tags": ["mlcf", "context-management", "overview"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[5m])) by (status)",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "reqps", "label": "Requests/sec"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Response Time (p95)",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Duration"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Error Rate",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+            "legendFormat": "Error Rate",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percentunit", "label": "Error Rate"},
+          {"format": "short"}
+        ],
+        "alert": {
+          "name": "High Error Rate",
+          "conditions": [
+            {
+              "evaluator": {"type": "gt", "params": [0.05]},
+              "query": {"params": ["A", "5m", "now"]}
+            }
+          ],
+          "frequency": "60s",
+          "for": "5m"
+        }
+      },
+      {
+        "id": 4,
+        "title": "Active Requests",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(http_requests_in_progress) by (endpoint)",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Context Items by Layer",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "context_items_total",
+            "legendFormat": "{{layer}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Items"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Search Performance",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(search_duration_seconds_bucket[5m])) by (le, strategy))",
+            "legendFormat": "{{strategy}} (p95)",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Duration"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Cache Hit Rate",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 24, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(context_cache_hits_total[5m])) / (sum(rate(context_cache_hits_total[5m])) + sum(rate(context_cache_misses_total[5m])))",
+            "legendFormat": "Cache Hit Rate",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percentunit", "label": "Hit Rate"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Memory Usage",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 24, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "memory_usage_bytes{type=~\"rss|vms\"}",
+            "legendFormat": "{{type}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "bytes", "label": "Memory"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Graph Database Stats",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 32, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(graph_nodes_total)",
+            "legendFormat": "Total Nodes",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]}
+        }
+      },
+      {
+        "id": 10,
+        "title": "Vector Collection Size",
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 32, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(vector_collection_size)",
+            "legendFormat": "Total Vectors",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {"calcs": ["lastNotNull"]}
+        }
+      },
+      {
+        "id": 11,
+        "title": "Authentication Success Rate",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 32, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(auth_attempts_total{status=\"success\"}[5m])) / sum(rate(auth_attempts_total[5m]))",
+            "legendFormat": "Success Rate",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percentunit", "label": "Success Rate"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Entity Extraction Rate",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 40, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(entities_extracted_count_sum[5m]) / rate(entities_extracted_count_count[5m])",
+            "legendFormat": "Avg Entities per Document",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "title": "Top Endpoints by Request Count",
+        "type": "bargauge",
+        "gridPos": {"x": 12, "y": 40, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "topk(10, sum(rate(http_requests_total[5m])) by (endpoint))",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus"
+        },
+        {
+          "name": "instance",
+          "type": "query",
+          "query": "label_values(http_requests_total, instance)",
+          "multi": true,
+          "includeAll": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "$datasource",
+          "enable": true,
+          "iconColor": "green"
+        }
+      ]
+    }
+  }
+}
