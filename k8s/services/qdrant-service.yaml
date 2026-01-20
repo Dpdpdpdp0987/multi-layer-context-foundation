@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: context-foundation
+  labels:
+    app: qdrant
+    component: vector-db
+    tier: data
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 6333
+    targetPort: http
+    protocol: TCP
+  - name: grpc
+    port: 6334
+    targetPort: grpc
+    protocol: TCP
+  selector:
+    app: qdrant
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-headless
+  namespace: context-foundation
+  labels:
+    app: qdrant
+    component: vector-db
+    tier: data
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: http
+    port: 6333
+    targetPort: http
+    protocol: TCP
+  - name: grpc
+    port: 6334
+    targetPort: grpc
+    protocol: TCP
+  - name: p2p
+    port: 6335
+    targetPort: p2p
+    protocol: TCP
+  selector:
+    app: qdrant
