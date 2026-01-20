@@ -1,40 +1,62 @@
 """
-Immediate Context Buffer - High-speed in-memory buffer for recent context.
+Immediate Context Buffer - Stores the most recent conversation exchanges.
+
+This buffer maintains a sliding window of the most recent context,
+optimized for ultra-fast access with minimal overhead.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional, Dict, Any
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from loguru import logger
+import threading
+
+from mlcf.core.context_models import ContextItem
 
 
 class ImmediateContextBuffer:
     """
-    Immediate context buffer for recent conversational context.
+    Fast-access buffer for immediate conversation context.
     
-    Implements a circular buffer with token budget management.
-    Optimized for fast access and recency-based retrieval.
+    Characteristics:
+    - FIFO eviction (oldest items removed first)
+    - Time-based expiration (TTL)
+    - Thread-safe operations
+    - Optimized for recency-based retrieval
+    - Minimal computational overhead
     """
     
-    def __init__(self, max_size: int = 10, max_tokens: int = 2048):
+    def __init__(
+        self,
+        max_size: int = 10,
+        ttl_seconds: int = 3600
+    ):
         """
         Initialize immediate context buffer.
         
         Args:
-            max_size: Maximum number of items
-            max_tokens: Maximum token budget
+            max_size: Maximum number of items to store
+            ttl_seconds: Time-to-live for items in seconds
         """
         self.max_size = max_size
-        self.max_tokens = max_tokens
-        self.buffer: deque = deque(maxlen=max_size)
-        self.current_tokens = 0
+        self.ttl_seconds = ttl_seconds
+        
+        # Use deque for O(1) append and popleft
+        self._buffer: deque[ContextItem] = deque(maxlen=max_size)
+        
+        # Thread safety
+        self._lock = threading.RLock()
+        
+        # Metrics
+        self._total_adds = 0
+        self._total_evictions = 0
         
         logger.info(
-            f"ImmediateContextBuffer initialized: max_size={max_size}, "
-            f"max_tokens={max_tokens}"
+            f"ImmediateContextBuffer initialized: "
+            f"max_size={max_size}, ttl={ttl_seconds}s"
         )
     
-    def add(self, item: Any) -> str:
+    def add(self, item: ContextItem) -> bool:
         """
         Add item to buffer.
         
@@ -42,139 +64,178 @@ class ImmediateContextBuffer:
             item: Context item to add
             
         Returns:
-            Item ID
+            True if added successfully
         """
-        # Estimate tokens for new item
-        item_tokens = self._estimate_tokens(item.content)
-        
-        # Make room if needed
-        while self.current_tokens + item_tokens > self.max_tokens and self.buffer:
-            evicted = self.buffer.popleft()
-            evicted_tokens = self._estimate_tokens(evicted.content)
-            self.current_tokens -= evicted_tokens
-            logger.debug(f"Evicted from buffer: {evicted.id}")
-        
-        # Add new item
-        self.buffer.append(item)
-        self.current_tokens += item_tokens
-        
-        logger.debug(
-            f"Added to buffer: {item.id}, tokens: {self.current_tokens}/{self.max_tokens}"
-        )
-        
-        return item.id
+        with self._lock:
+            # Check if buffer is full (will auto-evict with deque maxlen)
+            was_full = len(self._buffer) >= self.max_size
+            
+            # Add item (oldest will be auto-evicted if at capacity)
+            self._buffer.append(item)
+            
+            self._total_adds += 1
+            if was_full:
+                self._total_evictions += 1
+                logger.debug(f"Evicted oldest item from immediate buffer")
+            
+            logger.debug(
+                f"Added to immediate buffer: {item.id} "
+                f"(size: {len(self._buffer)}/{self.max_size})"
+            )
+            
+            return True
     
-    def search(
+    def get_recent(
         self,
-        query: str,
-        max_results: int = 5
-    ) -> List[Any]:
+        max_items: Optional[int] = None,
+        conversation_id: Optional[str] = None
+    ) -> List[ContextItem]:
         """
-        Search buffer for relevant items.
-        
-        Uses simple keyword matching with recency bias.
+        Get most recent items from buffer.
         
         Args:
-            query: Search query
-            max_results: Maximum results to return
+            max_items: Maximum number of items to return
+            conversation_id: Filter by conversation ID
             
         Returns:
-            List of matching items
+            List of recent context items
         """
-        query_lower = query.lower()
-        query_words = set(query_lower.split())
-        
-        results = []
-        
-        # Search from most recent to oldest
-        for idx, item in enumerate(reversed(list(self.buffer))):
-            content_lower = item.content.lower()
-            content_words = set(content_lower.split())
+        with self._lock:
+            # Remove expired items first
+            self._remove_expired()
             
-            # Calculate relevance
-            if query_words:
-                overlap = len(query_words & content_words)
-                relevance = overlap / len(query_words)
+            # Get all items (already in order, newest last)
+            items = list(self._buffer)
+            
+            # Filter by conversation if specified
+            if conversation_id:
+                items = [
+                    item for item in items
+                    if item.conversation_id == conversation_id
+                ]
+            
+            # Reverse to get newest first
+            items.reverse()
+            
+            # Limit results
+            if max_items:
+                items = items[:max_items]
+            
+            # Mark as accessed
+            for item in items:
+                item.mark_accessed()
+            
+            return items
+    
+    def get_all(self) -> List[ContextItem]:
+        """
+        Get all items in buffer (newest first).
+        
+        Returns:
+            All context items
+        """
+        with self._lock:
+            self._remove_expired()
+            items = list(self._buffer)
+            items.reverse()
+            return items
+    
+    def clear(self, conversation_id: Optional[str] = None):
+        """
+        Clear buffer or specific conversation.
+        
+        Args:
+            conversation_id: Clear only this conversation (or all if None)
+        """
+        with self._lock:
+            if conversation_id:
+                # Remove items for specific conversation
+                self._buffer = deque(
+                    (
+                        item for item in self._buffer
+                        if item.conversation_id != conversation_id
+                    ),
+                    maxlen=self.max_size
+                )
+                logger.info(f"Cleared conversation {conversation_id} from immediate buffer")
             else:
-                relevance = 0.0
-            
-            # Apply recency boost (more recent = higher score)
-            recency_boost = 1.0 - (idx * 0.1)
-            recency_boost = max(0.5, recency_boost)  # Minimum 0.5
-            
-            combined_score = relevance * recency_boost
-            
-            if combined_score > 0:
-                item.relevance_score = combined_score
-                results.append(item)
-        
-        # Sort by score
-        results.sort(key=lambda x: x.relevance_score, reverse=True)
-        
-        return results[:max_results]
+                # Clear everything
+                self._buffer.clear()
+                logger.info("Cleared immediate buffer")
     
-    def get_all(self) -> List[Any]:
+    def _remove_expired(self):
         """
-        Get all items in buffer.
+        Remove expired items based on TTL.
+        """
+        if not self.ttl_seconds:
+            return
         
-        Returns:
-            List of all items
-        """
-        return list(self.buffer)
-    
-    def get_recent(self, n: int = 5) -> List[Any]:
-        """
-        Get n most recent items.
+        cutoff_time = datetime.utcnow() - timedelta(seconds=self.ttl_seconds)
         
-        Args:
-            n: Number of items to retrieve
-            
-        Returns:
-            List of recent items
-        """
-        n = min(n, len(self.buffer))
-        return list(self.buffer)[-n:]
-    
-    def clear(self):
-        """Clear the buffer."""
-        self.buffer.clear()
-        self.current_tokens = 0
-        logger.info("Immediate buffer cleared")
-    
-    def get_token_usage(self) -> Dict[str, int]:
-        """
-        Get token usage statistics.
+        # Remove items older than cutoff
+        expired_count = 0
+        while self._buffer and self._buffer[0].timestamp < cutoff_time:
+            expired_item = self._buffer.popleft()
+            expired_count += 1
+            logger.debug(f"Removed expired item: {expired_item.id}")
         
-        Returns:
-            Dictionary with usage stats
-        """
-        return {
-            "current_tokens": self.current_tokens,
-            "max_tokens": self.max_tokens,
-            "usage_percent": (self.current_tokens / self.max_tokens) * 100 if self.max_tokens > 0 else 0,
-            "item_count": len(self.buffer)
-        }
+        if expired_count > 0:
+            logger.info(f"Removed {expired_count} expired items from immediate buffer")
     
-    def _estimate_tokens(self, text: str) -> int:
-        """
-        Estimate token count for text.
-        
-        Args:
-            text: Input text
-            
-        Returns:
-            Estimated token count
-        """
-        # Simple heuristic: ~4 characters per token
-        return max(1, len(text) // 4)
+    @property
+    def size(self) -> int:
+        """Get current buffer size."""
+        with self._lock:
+            return len(self._buffer)
+    
+    @property
+    def is_empty(self) -> bool:
+        """Check if buffer is empty."""
+        with self._lock:
+            return len(self._buffer) == 0
+    
+    @property
+    def is_full(self) -> bool:
+        """Check if buffer is full."""
+        with self._lock:
+            return len(self._buffer) >= self.max_size
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get buffer metrics."""
+        with self._lock:
+            self._remove_expired()
+            return {
+                "current_size": len(self._buffer),
+                "max_size": self.max_size,
+                "total_adds": self._total_adds,
+                "total_evictions": self._total_evictions,
+                "ttl_seconds": self.ttl_seconds,
+                "oldest_item_age": self._get_oldest_age(),
+                "newest_item_age": self._get_newest_age()
+            }
+    
+    def _get_oldest_age(self) -> Optional[float]:
+        """Get age of oldest item in seconds."""
+        if not self._buffer:
+            return None
+        oldest = self._buffer[0]
+        return (datetime.utcnow() - oldest.timestamp).total_seconds()
+    
+    def _get_newest_age(self) -> Optional[float]:
+        """Get age of newest item in seconds."""
+        if not self._buffer:
+            return None
+        newest = self._buffer[-1]
+        return (datetime.utcnow() - newest.timestamp).total_seconds()
     
     def __len__(self) -> int:
-        """Return buffer size."""
-        return len(self.buffer)
+        """Get buffer size."""
+        return self.size
     
     def __repr__(self) -> str:
         """String representation."""
         return (
-            f"ImmediateContextBuffer(items={len(self.buffer)}, "
-            f"tokens={self.current_tokens}/{self.max_tokens})"
+            f"ImmediateContextBuffer("
+            f"size={self.size}/{self.max_size}, "
+            f"ttl={self.ttl_seconds}s)"
         )
