@@ -1,0 +1,20 @@
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: context-foundation
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: context-api
+  namespace: context-foundation
+spec:
+  selector:
+    matchLabels:
+      app: context-api
+  mtls:
+    mode: STRICT

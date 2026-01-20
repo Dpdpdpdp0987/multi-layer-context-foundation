@@ -1,0 +1,74 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: context-api
+  namespace: context-foundation
+  labels:
+    app: context-api
+spec:
+  hosts:
+  - "context-api.example.com"
+  gateways:
+  - context-gateway
+  http:
+  - name: "api-routes"
+    match:
+    - uri:
+        prefix: "/api/v1"
+    route:
+    - destination:
+        host: context-api.context-foundation.svc.cluster.local
+        port:
+          number: 80
+        subset: v1
+      weight: 100
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+    timeout: 30s
+    corsPolicy:
+      allowOrigins:
+      - exact: "https://app.example.com"
+      - regex: "https://.*\.example\.com"
+      allowMethods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - PATCH
+      - OPTIONS
+      allowHeaders:
+      - authorization
+      - content-type
+      - x-api-key
+      - x-request-id
+      exposeHeaders:
+      - x-request-id
+      - x-trace-id
+      maxAge: 24h
+      allowCredentials: true
+  - name: "docs-routes"
+    match:
+    - uri:
+        prefix: "/docs"
+    - uri:
+        prefix: "/redoc"
+    - uri:
+        exact: "/openapi.json"
+    route:
+    - destination:
+        host: context-api.context-foundation.svc.cluster.local
+        port:
+          number: 80
+    timeout: 10s
+  - name: "health-routes"
+    match:
+    - uri:
+        prefix: "/health"
+    route:
+    - destination:
+        host: context-api.context-foundation.svc.cluster.local
+        port:
+          number: 80
+    timeout: 5s

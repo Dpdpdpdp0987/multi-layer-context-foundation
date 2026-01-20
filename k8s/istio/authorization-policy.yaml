@@ -1,0 +1,73 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: context-api-authz
+  namespace: context-foundation
+spec:
+  selector:
+    matchLabels:
+      app: context-api
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - istio-system
+        - context-foundation
+    to:
+    - operation:
+        methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - PATCH
+        paths:
+        - /api/v1/*
+        - /health/*
+        - /docs
+        - /redoc
+        - /openapi.json
+  - to:
+    - operation:
+        methods:
+        - GET
+        paths:
+        - /health
+        - /health/ready
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: qdrant-authz
+  namespace: context-foundation
+spec:
+  selector:
+    matchLabels:
+      app: qdrant
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - context-foundation
+        principals:
+        - cluster.local/ns/context-foundation/sa/context-api
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: neo4j-authz
+  namespace: context-foundation
+spec:
+  selector:
+    matchLabels:
+      app: neo4j
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - context-foundation
+        principals:
+        - cluster.local/ns/context-foundation/sa/context-api
