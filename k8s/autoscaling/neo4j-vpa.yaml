@@ -1,0 +1,27 @@
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: neo4j
+  namespace: context-foundation
+  labels:
+    app: neo4j
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: neo4j
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: neo4j
+      minAllowed:
+        cpu: 2000m
+        memory: 4Gi
+      maxAllowed:
+        cpu: 8000m
+        memory: 16Gi
+      controlledResources:
+      - cpu
+      - memory
+      mode: Auto
