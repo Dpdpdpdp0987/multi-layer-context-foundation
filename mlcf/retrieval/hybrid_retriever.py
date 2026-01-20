@@ -1,60 +1,81 @@
 """
-Hybrid retrieval system combining multiple search strategies.
+Hybrid Retriever - Updated with complete graph search integration.
 """
 
 from typing import Any, Dict, List, Optional
 from loguru import logger
 
+from mlcf.retrieval.bm25_search import BM25Search
+from mlcf.retrieval.semantic_search import SemanticSearch
+from mlcf.retrieval.graph_search import GraphSearch
+from mlcf.storage.vector_store import QdrantVectorStore
+from mlcf.graph.neo4j_store import Neo4jStore
+
 
 class HybridRetriever:
     """
-    Hybrid retrieval combining semantic, keyword, and graph-based search.
+    Complete hybrid retrieval combining semantic, keyword, and graph search.
     
-    Strategies:
-    - Semantic: Vector similarity search using embeddings
-    - Keyword: BM25-based keyword matching
-    - Graph: Relationship-based traversal
-    - Hybrid: Weighted combination of all strategies
+    Implements intelligent fusion of multiple search strategies.
     """
     
     def __init__(
         self,
-        vector_db: Any,
-        graph_db: Any,
+        vector_store: Optional[QdrantVectorStore] = None,
+        graph_store: Optional[Neo4jStore] = None,
         config: Optional[Dict[str, Any]] = None
     ):
-        """Initialize hybrid retriever."""
-        self.vector_db = vector_db
-        self.graph_db = graph_db
+        """
+        Initialize hybrid retriever.
+        
+        Args:
+            vector_store: Vector store for semantic search
+            graph_store: Graph store for graph search
+            config: Configuration dictionary
+        """
         self.config = config or {}
         
-        # Weights for hybrid strategy
+        # Strategy weights
         self.semantic_weight = self.config.get("semantic_weight", 0.5)
         self.keyword_weight = self.config.get("keyword_weight", 0.3)
         self.graph_weight = self.config.get("graph_weight", 0.2)
         
-        self.reranking_enabled = self.config.get("reranking_enabled", True)
+        # Initialize search components
+        self.bm25_search = BM25Search()
         
-        logger.info("HybridRetriever initialized")
+        self.semantic_search = None
+        if vector_store:
+            self.semantic_search = SemanticSearch(vector_store=vector_store)
+        
+        self.graph_search = None
+        if graph_store:
+            self.graph_search = GraphSearch(neo4j_store=graph_store)
+        
+        logger.info(
+            f"HybridRetriever initialized: "
+            f"semantic={self.semantic_search is not None}, "
+            f"keyword=True, "
+            f"graph={self.graph_search is not None}"
+        )
     
     def retrieve(
         self,
         query: str,
-        max_results: int = 5,
+        max_results: int = 10,
         strategy: str = "hybrid",
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve relevant documents using specified strategy.
+        Retrieve relevant documents.
         
         Args:
             query: Search query
-            max_results: Maximum number of results
-            strategy: Retrieval strategy (hybrid, semantic, keyword, graph)
-            filters: Optional metadata filters
+            max_results: Maximum results
+            strategy: Strategy (hybrid, semantic, keyword, graph)
+            filters: Optional filters
             
         Returns:
-            List of relevant documents with scores
+            Retrieved results
         """
         if strategy == "hybrid":
             return self._hybrid_retrieve(query, max_results, filters)
@@ -73,35 +94,18 @@ class HybridRetriever:
         max_results: int,
         filters: Optional[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Hybrid retrieval combining all strategies."""
-        # Get results from each strategy
-        semantic_results = self._semantic_retrieve(query, max_results * 2, filters)
+        """
+        Hybrid retrieval combining all strategies.
+        """
+        # Retrieve from each method
         keyword_results = self._keyword_retrieve(query, max_results * 2, filters)
+        semantic_results = self._semantic_retrieve(query, max_results * 2, filters)
         graph_results = self._graph_retrieve(query, max_results * 2, filters)
         
-        # Merge and rerank
-        merged = self._merge_results(
-            semantic_results,
-            keyword_results,
-            graph_results
-        )
+        # Fuse results
+        fused = self._fuse_results(keyword_results, semantic_results, graph_results)
         
-        # Apply reranking if enabled
-        if self.reranking_enabled:
-            merged = self._rerank(query, merged)
-        
-        return merged[:max_results]
-    
-    def _semantic_retrieve(
-        self,
-        query: str,
-        max_results: int,
-        filters: Optional[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Semantic retrieval using vector similarity."""
-        # TODO: Implement vector search
-        logger.debug(f"Semantic retrieval for: {query}")
-        return []  # Placeholder
+        return fused[:max_results]
     
     def _keyword_retrieve(
         self,
@@ -109,10 +113,19 @@ class HybridRetriever:
         max_results: int,
         filters: Optional[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Keyword-based retrieval using BM25."""
-        # TODO: Implement BM25 search
-        logger.debug(f"Keyword retrieval for: {query}")
-        return []  # Placeholder
+        """BM25 keyword retrieval."""
+        return self.bm25_search.search(query, max_results, filters)
+    
+    def _semantic_retrieve(
+        self,
+        query: str,
+        max_results: int,
+        filters: Optional[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Semantic vector retrieval."""
+        if not self.semantic_search:
+            return []
+        return self.semantic_search.search(query, max_results, filters=filters)
     
     def _graph_retrieve(
         self,
@@ -120,66 +133,79 @@ class HybridRetriever:
         max_results: int,
         filters: Optional[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Graph-based retrieval using relationship traversal."""
-        # TODO: Implement graph traversal
-        logger.debug(f"Graph retrieval for: {query}")
-        return []  # Placeholder
+        """Graph-based retrieval."""
+        if not self.graph_search:
+            return []
+        return self.graph_search.search(query, max_results)
     
-    def _merge_results(
+    def _fuse_results(
         self,
-        semantic: List[Dict],
         keyword: List[Dict],
+        semantic: List[Dict],
         graph: List[Dict]
     ) -> List[Dict[str, Any]]:
-        """Merge results from different strategies."""
-        # Create a mapping of doc_id to combined scores
-        doc_scores: Dict[str, Dict[str, Any]] = {}
+        """Fuse results from multiple strategies."""
+        # Normalize scores
+        keyword = self._normalize_scores(keyword)
+        semantic = self._normalize_scores(semantic)
+        graph = self._normalize_scores(graph)
         
-        # Process semantic results
-        for result in semantic:
-            doc_id = result.get("id", result.get("doc_id"))
-            if doc_id not in doc_scores:
-                doc_scores[doc_id] = result.copy()
-                doc_scores[doc_id]["combined_score"] = 0.0
-            
-            score = result.get("score", 0.0)
-            doc_scores[doc_id]["combined_score"] += score * self.semantic_weight
-            doc_scores[doc_id]["semantic_score"] = score
+        # Combine scores
+        score_map = {}
         
-        # Process keyword results
         for result in keyword:
-            doc_id = result.get("id", result.get("doc_id"))
-            if doc_id not in doc_scores:
-                doc_scores[doc_id] = result.copy()
-                doc_scores[doc_id]["combined_score"] = 0.0
-            
-            score = result.get("score", 0.0)
-            doc_scores[doc_id]["combined_score"] += score * self.keyword_weight
-            doc_scores[doc_id]["keyword_score"] = score
+            doc_id = result["id"]
+            score_map[doc_id] = {
+                **result,
+                "combined_score": result["score"] * self.keyword_weight,
+                "component_scores": {"keyword": result["score"]}
+            }
         
-        # Process graph results
+        for result in semantic:
+            doc_id = result["id"]
+            if doc_id not in score_map:
+                score_map[doc_id] = {
+                    **result,
+                    "combined_score": 0.0,
+                    "component_scores": {}
+                }
+            score_map[doc_id]["component_scores"]["semantic"] = result["score"]
+            score_map[doc_id]["combined_score"] += result["score"] * self.semantic_weight
+        
         for result in graph:
-            doc_id = result.get("id", result.get("doc_id"))
-            if doc_id not in doc_scores:
-                doc_scores[doc_id] = result.copy()
-                doc_scores[doc_id]["combined_score"] = 0.0
-            
-            score = result.get("score", 0.0)
-            doc_scores[doc_id]["combined_score"] += score * self.graph_weight
-            doc_scores[doc_id]["graph_score"] = score
+            doc_id = result["id"]
+            if doc_id not in score_map:
+                score_map[doc_id] = {
+                    **result,
+                    "combined_score": 0.0,
+                    "component_scores": {}
+                }
+            score_map[doc_id]["component_scores"]["graph"] = result["score"]
+            score_map[doc_id]["combined_score"] += result["score"] * self.graph_weight
         
-        # Convert to list and sort by combined score
-        merged_results = list(doc_scores.values())
-        merged_results.sort(key=lambda x: x["combined_score"], reverse=True)
+        # Sort by combined score
+        results = list(score_map.values())
+        results.sort(key=lambda x: x["combined_score"], reverse=True)
         
-        return merged_results
+        for r in results:
+            r["score"] = r["combined_score"]
+            r["method"] = "hybrid"
+        
+        return results
     
-    def _rerank(
-        self,
-        query: str,
-        results: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Rerank results using cross-encoder."""
-        # TODO: Implement cross-encoder reranking
-        logger.debug(f"Reranking {len(results)} results")
-        return results  # Placeholder
+    def _normalize_scores(self, results: List[Dict]) -> List[Dict]:
+        """Normalize scores to [0, 1]."""
+        if not results:
+            return results
+        
+        scores = [r["score"] for r in results]
+        min_score = min(scores)
+        max_score = max(scores)
+        
+        if max_score - min_score < 1e-10:
+            return results
+        
+        for result in results:
+            result["score"] = (result["score"] - min_score) / (max_score - min_score)
+        
+        return results
