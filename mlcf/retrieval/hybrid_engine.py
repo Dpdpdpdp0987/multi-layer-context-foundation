@@ -9,6 +9,9 @@ from loguru import logger
 
 from mlcf.retrieval.bm25_search import BM25Search
 from mlcf.retrieval.adaptive_chunking import AdaptiveChunker
+from mlcf.retrieval.semantic_search import SemanticSearch, SemanticSearchConfig
+from mlcf.embeddings.embedding_generator import EmbeddingGenerator
+from mlcf.storage.vector_store import QdrantVectorStore
 
 
 @dataclass
@@ -40,14 +43,15 @@ class HybridRetrievalEngine:
     Implements:
     - Semantic search (vector similarity)
     - Keyword search (BM25)
-    - Graph search (relationship traversal)
+    - Graph search (relationship traversal) [TODO]
     - Intelligent result fusion and reranking
     """
     
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
-        embedding_config: Optional[Dict[str, Any]] = None
+        embedding_config: Optional[Dict[str, Any]] = None,
+        vector_store: Optional[QdrantVectorStore] = None
     ):
         """
         Initialize hybrid retrieval engine.
@@ -55,6 +59,7 @@ class HybridRetrievalEngine:
         Args:
             config: Retrieval configuration
             embedding_config: Embedding model configuration
+            vector_store: Pre-initialized vector store (optional)
         """
         self.config = config or {}
         self.embedding_config = embedding_config or {}
@@ -64,21 +69,38 @@ class HybridRetrievalEngine:
         self.keyword_weight = self.config.get("keyword_weight", 0.3)
         self.graph_weight = self.config.get("graph_weight", 0.2)
         
-        # Initialize components
+        # Initialize BM25 search
         self.bm25_search = BM25Search(
             k1=self.config.get("bm25_k1", 1.5),
             b=self.config.get("bm25_b", 0.75)
         )
         
+        # Initialize chunker
         self.chunker = AdaptiveChunker(
             chunk_size=self.config.get("chunk_size", 512),
             base_overlap=self.config.get("chunk_overlap", 50),
             adaptive_overlap=self.config.get("adaptive_overlap", True)
         )
         
-        # Lazy initialization
-        self._vector_search = None
+        # Initialize semantic search (if vector store provided)
+        self.semantic_search = None
+        if vector_store:
+            semantic_config = SemanticSearchConfig(
+                embedding_model=self.embedding_config.get(
+                    "model",
+                    "sentence-transformers/all-MiniLM-L6-v2"
+                ),
+                score_threshold=self.config.get("semantic_threshold", 0.5)
+            )
+            self.semantic_search = SemanticSearch(
+                vector_store=vector_store,
+                config=semantic_config
+            )
+        
+        # Graph search (TODO)
         self._graph_search = None
+        
+        # Reranker (TODO)
         self._reranker = None
         
         # Document storage
@@ -86,15 +108,38 @@ class HybridRetrievalEngine:
         
         logger.info(
             f"HybridRetrievalEngine initialized: "
-            f"weights=({self.semantic_weight}, {self.keyword_weight}, {self.graph_weight})"
+            f"weights=({self.semantic_weight}, {self.keyword_weight}, {self.graph_weight}), "
+            f"semantic_enabled={self.semantic_search is not None}"
         )
+    
+    def set_vector_store(self, vector_store: QdrantVectorStore):
+        """
+        Set vector store for semantic search.
+        
+        Args:
+            vector_store: Qdrant vector store instance
+        """
+        semantic_config = SemanticSearchConfig(
+            embedding_model=self.embedding_config.get(
+                "model",
+                "sentence-transformers/all-MiniLM-L6-v2"
+            )
+        )
+        
+        self.semantic_search = SemanticSearch(
+            vector_store=vector_store,
+            config=semantic_config
+        )
+        
+        logger.info("Vector store set for semantic search")
     
     def index_document(
         self,
         doc_id: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
-        auto_chunk: bool = True
+        auto_chunk: bool = True,
+        index_in_vector_store: bool = False
     ):
         """
         Index document for retrieval.
@@ -104,6 +149,7 @@ class HybridRetrievalEngine:
             content: Document content
             metadata: Optional metadata
             auto_chunk: Automatically chunk long documents
+            index_in_vector_store: Also index in vector store
         """
         metadata = metadata or {}
         
@@ -132,18 +178,32 @@ class HybridRetrievalEngine:
                     }
                 )
                 
-                # TODO: Index in vector store
-                # TODO: Index in graph store
+                # Index in vector store if enabled and available
+                if index_in_vector_store and self.semantic_search:
+                    self.semantic_search.vector_store.add(
+                        doc_id=chunk_id,
+                        content=chunk.content,
+                        metadata={
+                            **metadata,
+                            "parent_doc_id": doc_id,
+                            "chunk_index": chunk.metadata.get("chunk_index")
+                        }
+                    )
         else:
-            # Index whole document
+            # Index whole document in BM25
             self.bm25_search.add_document(
                 doc_id=doc_id,
                 content=content,
                 metadata=metadata
             )
             
-            # TODO: Index in vector store
-            # TODO: Index in graph store
+            # Index in vector store if enabled
+            if index_in_vector_store and self.semantic_search:
+                self.semantic_search.vector_store.add(
+                    doc_id=doc_id,
+                    content=content,
+                    metadata=metadata
+                )
         
         logger.debug(f"Indexed document: {doc_id}")
     
@@ -194,7 +254,7 @@ class HybridRetrievalEngine:
         Returns:
             Fused and ranked results
         """
-        # Retrieve from each method
+        # Retrieve from each method (get more for better fusion)
         keyword_results = self._keyword_retrieve(
             query,
             max_results * 2,
@@ -205,7 +265,7 @@ class HybridRetrievalEngine:
             query,
             max_results * 2,
             filters
-        )
+        ) if self.semantic_search else []
         
         graph_results = self._graph_retrieve(
             query,
@@ -221,7 +281,7 @@ class HybridRetrievalEngine:
         )
         
         # Apply reranking if enabled
-        if self.config.get("reranking_enabled", True):
+        if self.config.get("reranking_enabled", False) and self._reranker:
             fused_results = self._rerank_results(query, fused_results)
         
         return fused_results[:max_results]
@@ -269,9 +329,18 @@ class HybridRetrievalEngine:
         Returns:
             Semantic search results
         """
-        # TODO: Implement vector search
-        logger.debug("Semantic search not yet implemented")
-        return []
+        if not self.semantic_search:
+            logger.debug("Semantic search not available")
+            return []
+        
+        results = self.semantic_search.search(
+            query=query,
+            max_results=max_results,
+            filters=filters
+        )
+        
+        logger.debug(f"Semantic search returned {len(results)} results")
+        return results
     
     def _graph_retrieve(
         self,
@@ -438,12 +507,18 @@ class HybridRetrievalEngine:
         Returns:
             Statistics dictionary
         """
-        return {
+        stats = {
             "total_documents": len(self.documents),
             "bm25_stats": self.bm25_search.get_statistics(),
             "weights": {
                 "semantic": self.semantic_weight,
                 "keyword": self.keyword_weight,
                 "graph": self.graph_weight
-            }
+            },
+            "semantic_enabled": self.semantic_search is not None
         }
+        
+        if self.semantic_search:
+            stats["semantic_stats"] = self.semantic_search.vector_store.get_collection_info()
+        
+        return stats
