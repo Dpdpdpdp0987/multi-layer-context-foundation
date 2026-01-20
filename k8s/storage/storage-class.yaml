@@ -1,0 +1,47 @@
+# Fast SSD storage class for high-performance databases
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+  labels:
+    tier: data
+provisioner: kubernetes.io/aws-ebs  # Change based on cloud provider
+parameters:
+  type: gp3  # AWS EBS gp3 (adjust for your cloud provider)
+  iops: "16000"
+  throughput: "1000"
+  encrypted: "true"
+  kmsKeyId: "alias/kubernetes-storage"  # Optional: use KMS encryption
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+---
+# Standard storage class for logs and backups
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard
+  labels:
+    tier: data
+provisioner: kubernetes.io/aws-ebs  # Change based on cloud provider
+parameters:
+  type: gp2  # AWS EBS gp2 (adjust for your cloud provider)
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+---
+# Archive storage class for long-term backups
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: archive
+  labels:
+    tier: data
+provisioner: kubernetes.io/aws-ebs
+parameters:
+  type: sc1  # Cold HDD for archive
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Retain
